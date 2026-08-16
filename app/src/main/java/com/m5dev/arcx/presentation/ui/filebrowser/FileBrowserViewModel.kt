@@ -9,12 +9,14 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.m5dev.arcx.domain.model.FileItem
 import com.m5dev.arcx.domain.repository.FileRepository
+import com.m5dev.arcx.worker.CompressionWorker
 import com.m5dev.arcx.worker.ExtractionWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -40,58 +42,113 @@ class FileBrowserViewModel @Inject constructor(
                 folderNameStack = listOf(StorageLocation.INTERNAL_STORAGE.displayName)
             )
         }
-        observeExtractionJobs()
+        observeArchiveJobs()
     }
 
-    private fun observeExtractionJobs() {
+    private fun observeArchiveJobs() {
         viewModelScope.launch {
             try {
-                workManager.getWorkInfosByTagFlow(ExtractionWorker.TAG_EXTRACTION_WORK)
-                    .collect { workInfoList ->
-                        val jobItems = workInfoList.map { workInfo ->
-                            val progress = workInfo.progress
+                val extractionFlow = workManager.getWorkInfosByTagFlow(ExtractionWorker.TAG_EXTRACTION_WORK)
+                val compressionFlow = workManager.getWorkInfosByTagFlow(CompressionWorker.TAG_COMPRESSION_WORK)
 
-                            val archivePath = progress.getString(ExtractionWorker.KEY_ARCHIVE_PATH)
-                                ?: workInfo.outputData.getString(ExtractionWorker.KEY_ARCHIVE_PATH)
-                                ?: ""
-                            val destPath = progress.getString(ExtractionWorker.KEY_DEST_PATH)
-                                ?: workInfo.outputData.getString(ExtractionWorker.KEY_DEST_PATH)
-                                ?: ""
-                            val archiveName = progress.getString(ExtractionWorker.KEY_ARCHIVE_NAME)
-                                ?: workInfo.outputData.getString(ExtractionWorker.KEY_ARCHIVE_NAME)
-                                ?: if (archivePath.isNotEmpty()) File(archivePath).name else "Archive"
+                combine(extractionFlow, compressionFlow) { extractionList, compressionList ->
+                    val extractionJobs = extractionList.map { workInfo ->
+                        val progress = workInfo.progress
 
-                            val currentFile = progress.getInt(ExtractionWorker.KEY_CURRENT_FILE, 0)
-                            val totalFiles = progress.getInt(ExtractionWorker.KEY_TOTAL_FILES, 0)
-                            val percentage = progress.getInt(ExtractionWorker.KEY_PERCENTAGE, 0)
-                            val currentFileName = progress.getString(ExtractionWorker.KEY_FILE_NAME) ?: ""
-                            val errorMessage = workInfo.outputData.getString(ExtractionWorker.KEY_ERROR_MESSAGE)
+                        val archivePath = progress.getString(ExtractionWorker.KEY_ARCHIVE_PATH)
+                            ?: workInfo.outputData.getString(ExtractionWorker.KEY_ARCHIVE_PATH)
+                            ?: ""
+                        val destPath = progress.getString(ExtractionWorker.KEY_DEST_PATH)
+                            ?: workInfo.outputData.getString(ExtractionWorker.KEY_DEST_PATH)
+                            ?: ""
+                        val archiveName = progress.getString(ExtractionWorker.KEY_ARCHIVE_NAME)
+                            ?: workInfo.outputData.getString(ExtractionWorker.KEY_ARCHIVE_NAME)
+                            ?: if (archivePath.isNotEmpty()) File(archivePath).name else "Archive"
 
-                            val status = when (workInfo.state) {
-                                WorkInfo.State.ENQUEUED -> ExtractionJobStatus.ENQUEUED
-                                WorkInfo.State.RUNNING -> ExtractionJobStatus.RUNNING
-                                WorkInfo.State.SUCCEEDED -> ExtractionJobStatus.SUCCEEDED
-                                WorkInfo.State.FAILED -> ExtractionJobStatus.FAILED
-                                WorkInfo.State.BLOCKED -> ExtractionJobStatus.ENQUEUED
-                                WorkInfo.State.CANCELLED -> ExtractionJobStatus.CANCELLED
-                            }
+                        val currentFile = progress.getInt(ExtractionWorker.KEY_CURRENT_FILE, 0)
+                        val totalFiles = progress.getInt(ExtractionWorker.KEY_TOTAL_FILES, 0)
+                        val percentage = progress.getInt(ExtractionWorker.KEY_PERCENTAGE, 0)
+                        val currentFileName = progress.getString(ExtractionWorker.KEY_FILE_NAME) ?: ""
+                        val errorMessage = workInfo.outputData.getString(ExtractionWorker.KEY_ERROR_MESSAGE)
 
-                            ExtractionJobItem(
-                                id = workInfo.id,
-                                archiveName = archiveName,
-                                archivePath = archivePath,
-                                destPath = destPath,
-                                status = status,
-                                currentFile = currentFile,
-                                totalFiles = totalFiles,
-                                percentage = percentage,
-                                currentFileName = currentFileName,
-                                errorMessage = errorMessage
-                            )
-                        }.sortedWith(compareBy({ !it.isActive }, { it.archiveName }))
+                        val status = when (workInfo.state) {
+                            WorkInfo.State.ENQUEUED -> JobStatus.ENQUEUED
+                            WorkInfo.State.RUNNING -> JobStatus.RUNNING
+                            WorkInfo.State.SUCCEEDED -> JobStatus.SUCCEEDED
+                            WorkInfo.State.FAILED -> JobStatus.FAILED
+                            WorkInfo.State.BLOCKED -> JobStatus.ENQUEUED
+                            WorkInfo.State.CANCELLED -> JobStatus.CANCELLED
+                        }
 
-                        _uiState.update { it.copy(activeJobs = jobItems) }
+                        ArchiveJobItem(
+                            id = workInfo.id,
+                            jobType = JobType.EXTRACTION,
+                            archiveName = archiveName,
+                            sourceOrArchivePath = archivePath,
+                            destPath = destPath,
+                            status = status,
+                            currentFile = currentFile,
+                            totalFiles = totalFiles,
+                            percentage = percentage,
+                            currentFileName = currentFileName,
+                            errorMessage = errorMessage
+                        )
                     }
+
+                    val compressionJobs = compressionList.map { workInfo ->
+                        val progress = workInfo.progress
+
+                        val destArchivePath = progress.getString(CompressionWorker.KEY_DEST_ARCHIVE_PATH)
+                            ?: workInfo.outputData.getString(CompressionWorker.KEY_DEST_ARCHIVE_PATH)
+                            ?: ""
+                        val archiveName = progress.getString(CompressionWorker.KEY_ARCHIVE_NAME)
+                            ?: workInfo.outputData.getString(CompressionWorker.KEY_ARCHIVE_NAME)
+                            ?: if (destArchivePath.isNotEmpty()) File(destArchivePath).name else "Archive"
+
+                        val currentFile = progress.getInt(CompressionWorker.KEY_CURRENT_FILE, 0)
+                        val totalFiles = progress.getInt(CompressionWorker.KEY_TOTAL_FILES, 0)
+                        val percentage = progress.getInt(CompressionWorker.KEY_PERCENTAGE, 0)
+                        val currentFileName = progress.getString(CompressionWorker.KEY_FILE_NAME) ?: ""
+                        val errorMessage = workInfo.outputData.getString(CompressionWorker.KEY_ERROR_MESSAGE)
+
+                        val status = when (workInfo.state) {
+                            WorkInfo.State.ENQUEUED -> JobStatus.ENQUEUED
+                            WorkInfo.State.RUNNING -> JobStatus.RUNNING
+                            WorkInfo.State.SUCCEEDED -> JobStatus.SUCCEEDED
+                            WorkInfo.State.FAILED -> JobStatus.FAILED
+                            WorkInfo.State.BLOCKED -> JobStatus.ENQUEUED
+                            WorkInfo.State.CANCELLED -> JobStatus.CANCELLED
+                        }
+
+                        ArchiveJobItem(
+                            id = workInfo.id,
+                            jobType = JobType.COMPRESSION,
+                            archiveName = archiveName,
+                            sourceOrArchivePath = destArchivePath,
+                            destPath = if (destArchivePath.isNotEmpty()) File(destArchivePath).parent ?: "" else "",
+                            status = status,
+                            currentFile = currentFile,
+                            totalFiles = totalFiles,
+                            percentage = percentage,
+                            currentFileName = currentFileName,
+                            errorMessage = errorMessage
+                        )
+                    }
+
+                    (extractionJobs + compressionJobs).sortedWith(compareBy({ !it.isActive }, { it.archiveName }))
+                }.collect { jobItems ->
+                    val previousJobs = _uiState.value.activeJobs
+                    _uiState.update { it.copy(activeJobs = jobItems) }
+
+                    // Automatically refresh current folder when a compression job completes
+                    val newlySucceededCompression = jobItems.any { job ->
+                        job.jobType == JobType.COMPRESSION && job.status == JobStatus.SUCCEEDED &&
+                                previousJobs.find { it.id == job.id }?.status != JobStatus.SUCCEEDED
+                    }
+                    if (newlySucceededCompression) {
+                        refreshCurrentDirectory()
+                    }
+                }
             } catch (e: Exception) {
                 // WorkManager might not be initialized in test environments
             }
@@ -299,10 +356,167 @@ class FileBrowserViewModel @Inject constructor(
         }
     }
 
+    fun toggleItemSelection(fileItem: FileItem) {
+        _uiState.update { state ->
+            val newSelected = if (state.selectedPaths.contains(fileItem.path)) {
+                state.selectedPaths - fileItem.path
+            } else {
+                state.selectedPaths + fileItem.path
+            }
+            state.copy(
+                selectedPaths = newSelected,
+                isSelectionMode = newSelected.isNotEmpty()
+            )
+        }
+    }
+
+    fun clearSelection() {
+        _uiState.update {
+            it.copy(
+                selectedPaths = emptySet(),
+                isSelectionMode = false
+            )
+        }
+    }
+
     fun onOptionActionCompress(fileItem: FileItem) {
         onDismissFileOptions()
+        openCompressDialogForPaths(listOf(fileItem.path), fileItem.name)
+    }
+
+    fun onCompressSelectedFiles() {
+        val selected = _uiState.value.selectedPaths.toList()
+        if (selected.isEmpty()) return
+        val defaultName = if (selected.size == 1) {
+            File(selected.first()).name
+        } else {
+            "Archive_${System.currentTimeMillis() / 1000}"
+        }
+        openCompressDialogForPaths(selected, defaultName)
+    }
+
+    private fun openCompressDialogForPaths(paths: List<String>, rawName: String) {
+        val defaultName = rawName.substringBeforeLast(".")
+        val config = CompressionConfig(
+            sourcePaths = paths,
+            defaultName = if (defaultName.isBlank()) "Archive" else defaultName
+        )
         _uiState.update {
-            it.copy(snackbarMessage = "Compressing ${fileItem.name}...")
+            it.copy(compressionConfig = config)
+        }
+    }
+
+    fun onDismissCompressionDialog() {
+        _uiState.update { it.copy(compressionConfig = null) }
+    }
+
+    fun onSubmitCompression(config: CompressionConfig, archiveName: String) {
+        val cleanName = archiveName.trim().removeSuffix(".zip").removeSuffix(".7z").removeSuffix(".tar")
+        val ext = when (config.format.lowercase()) {
+            "7z" -> ".7z"
+            "tar" -> ".tar"
+            else -> ".zip"
+        }
+        val fullArchiveName = cleanName + ext
+        val currentPath = _uiState.value.currentPath
+        val destArchivePath = "$currentPath/$fullArchiveName"
+
+        if (config.password.isNotEmpty() && config.password.length < 4) {
+            _uiState.update {
+                it.copy(snackbarMessage = "Password must be at least 4 characters long")
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            val requiredBytes = fileRepository.calculateTotalSize(config.sourcePaths)
+            val availableBytes = fileRepository.getAvailableSpaceInBytes(currentPath)
+
+            if (availableBytes > 0 && availableBytes < requiredBytes) {
+                _uiState.update {
+                    it.copy(snackbarMessage = "Insufficient storage space available")
+                }
+                return@launch
+            }
+
+            val finalConfig = config.copy(defaultName = cleanName)
+            val currentFiles = fileRepository.getFilesForPath(currentPath).getOrDefault(emptyList())
+            val exists = currentFiles.any { it.name.equals(fullArchiveName, ignoreCase = true) }
+
+            if (exists) {
+                _uiState.update {
+                    it.copy(
+                        compressionConfig = null,
+                        pendingCompressionConfig = finalConfig,
+                        showOverwritePrompt = true
+                    )
+                }
+            } else {
+                _uiState.update { it.copy(compressionConfig = null) }
+                enqueueCompressionWorker(finalConfig, destArchivePath, fullArchiveName)
+            }
+        }
+    }
+
+    fun onConfirmOverwriteCompression() {
+        val config = _uiState.value.pendingCompressionConfig ?: return
+        _uiState.update {
+            it.copy(
+                showOverwritePrompt = false,
+                pendingCompressionConfig = null
+            )
+        }
+
+        val ext = when (config.format.lowercase()) {
+            "7z" -> ".7z"
+            "tar" -> ".tar"
+            else -> ".zip"
+        }
+        val fullArchiveName = config.defaultName + ext
+        val currentPath = _uiState.value.currentPath
+        val destArchivePath = "$currentPath/$fullArchiveName"
+
+        // Delete existing file before overwriting
+        File(destArchivePath).delete()
+
+        enqueueCompressionWorker(config, destArchivePath, fullArchiveName)
+    }
+
+    fun onDismissOverwritePrompt() {
+        _uiState.update {
+            it.copy(
+                showOverwritePrompt = false,
+                pendingCompressionConfig = null
+            )
+        }
+    }
+
+    private fun enqueueCompressionWorker(config: CompressionConfig, destArchivePath: String, archiveName: String) {
+        try {
+            val workRequest = OneTimeWorkRequestBuilder<CompressionWorker>()
+                .addTag(CompressionWorker.TAG_COMPRESSION_WORK)
+                .setInputData(
+                    workDataOf(
+                        CompressionWorker.KEY_SOURCE_PATHS to config.sourcePaths.toTypedArray(),
+                        CompressionWorker.KEY_DEST_ARCHIVE_PATH to destArchivePath,
+                        CompressionWorker.KEY_FORMAT to config.format,
+                        CompressionWorker.KEY_LEVEL to config.compressionLevel,
+                        CompressionWorker.KEY_PASSWORD to config.password,
+                        CompressionWorker.KEY_ENCRYPTION_METHOD to config.encryptionMethod
+                    )
+                )
+                .build()
+
+            workManager.enqueue(workRequest)
+        } catch (e: Exception) {
+            // Fallback if WorkManager is not configured in test environment
+        }
+
+        clearSelection()
+        _uiState.update { state ->
+            state.copy(
+                snackbarMessage = "Compression started in background: $archiveName"
+            )
         }
     }
 

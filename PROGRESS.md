@@ -16,10 +16,10 @@
 - [x] NDK integration (libarchive)
 - [x] Archive extraction (ZIP)
 - [x] Background extraction with notifications
+- [x] Archive creation
+- [x] Password-protected archive creation
 
 ## Next Steps
-- [ ] Archive creation
-- [ ] Password-protected archive creation
 - [ ] Settings screen
 
 ## Notes
@@ -34,4 +34,5 @@
 - Background extraction managed by WorkManager (`ExtractionWorker`) as a Foreground Service with persistent NotificationCompat notifications
 - Notification system includes ongoing extraction progress bar (current/total files, percentage), Cancel button action, completion notification with "Open folder" action, and failure error alerts
 - UI includes Active Jobs sheet accessible from TopAppBar displaying real-time job progress, cancellation controls, and navigation to extracted folders
-- Currently supported formats: ZIP (done), 7Z/RAR/TAR (next)
+- Currently supported formats for extraction: ZIP, 7Z, RAR, TAR
+- Currently supported formats for creation: ZIP (ZipCrypto, AES-256), 7Z, TAR

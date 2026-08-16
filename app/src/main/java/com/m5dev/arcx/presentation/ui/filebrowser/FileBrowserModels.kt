@@ -9,7 +9,12 @@ enum class StorageLocation(val displayName: String) {
     DOWNLOADS("Downloads")
 }
 
-enum class ExtractionJobStatus {
+enum class JobType {
+    EXTRACTION,
+    COMPRESSION
+}
+
+enum class JobStatus {
     ENQUEUED,
     RUNNING,
     SUCCEEDED,
@@ -17,12 +22,13 @@ enum class ExtractionJobStatus {
     CANCELLED
 }
 
-data class ExtractionJobItem(
+data class ArchiveJobItem(
     val id: UUID,
+    val jobType: JobType,
     val archiveName: String,
-    val archivePath: String,
+    val sourceOrArchivePath: String,
     val destPath: String,
-    val status: ExtractionJobStatus,
+    val status: JobStatus,
     val currentFile: Int = 0,
     val totalFiles: Int = 0,
     val percentage: Int = 0,
@@ -30,14 +36,25 @@ data class ExtractionJobItem(
     val errorMessage: String? = null
 ) {
     val isActive: Boolean
-        get() = status == ExtractionJobStatus.RUNNING || status == ExtractionJobStatus.ENQUEUED
+        get() = status == JobStatus.RUNNING || status == JobStatus.ENQUEUED
 }
+
+data class CompressionConfig(
+    val sourcePaths: List<String>,
+    val defaultName: String,
+    val format: String = "ZIP", // ZIP, 7Z, TAR
+    val compressionLevel: String = "Normal", // Store, Fast, Normal, Maximum
+    val password: String = "",
+    val encryptionMethod: String = "AES-256" // ZipCrypto or AES-256
+)
 
 data class FileBrowserUiState(
     val selectedLocation: StorageLocation = StorageLocation.INTERNAL_STORAGE,
     val pathStack: List<String> = emptyList(),
     val folderNameStack: List<String> = emptyList(),
     val items: List<FileItem> = emptyList(),
+    val selectedPaths: Set<String> = emptySet(),
+    val isSelectionMode: Boolean = false,
     val isLoading: Boolean = false,
     val isExtracting: Boolean = false,
     val extractingFileName: String? = null,
@@ -50,8 +67,11 @@ data class FileBrowserUiState(
     val selectedItemForDelete: FileItem? = null,
     val selectedItemForDetails: FileItem? = null,
     val showCreateArchiveDialog: Boolean = false,
+    val compressionConfig: CompressionConfig? = null,
+    val pendingCompressionConfig: CompressionConfig? = null,
+    val showOverwritePrompt: Boolean = false,
     val showActiveJobsSheet: Boolean = false,
-    val activeJobs: List<ExtractionJobItem> = emptyList(),
+    val activeJobs: List<ArchiveJobItem> = emptyList(),
     val snackbarMessage: String? = null,
     val errorMessage: String? = null
 ) {

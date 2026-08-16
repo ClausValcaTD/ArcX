@@ -16,4 +16,15 @@ interface FileRepository {
         onProgress: ((current: Int, total: Int, fileName: String) -> Boolean)? = null
     ): Result<Boolean>
     suspend fun listArchiveContents(archivePath: String): Result<List<String>>
+    suspend fun createArchiveWithProgress(
+        sourcePaths: List<String>,
+        destArchivePath: String,
+        format: String = "zip",
+        level: String = "Normal",
+        password: String? = null,
+        encryptionMethod: String? = null,
+        onProgress: ((current: Int, total: Int, fileName: String) -> Boolean)? = null
+    ): Result<Boolean>
+    fun getAvailableSpaceInBytes(path: String): Long
+    suspend fun calculateTotalSize(paths: List<String>): Long
 }
