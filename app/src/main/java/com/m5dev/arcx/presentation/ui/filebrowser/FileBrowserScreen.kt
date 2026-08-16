@@ -34,8 +34,10 @@ import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -47,12 +49,15 @@ import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -91,6 +96,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.m5dev.arcx.domain.model.FileItem
 import com.m5dev.arcx.domain.model.FileType
+import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -178,6 +184,25 @@ fun FileBrowserScreen(
                         }
                     }
                 },
+                actions = {
+                    IconButton(onClick = { viewModel.onOpenActiveJobsSheet() }) {
+                        if (uiState.activeJobsCount > 0) {
+                            BadgedBox(
+                                badge = { Badge { Text("${uiState.activeJobsCount}") } }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.FormatListBulleted,
+                                    contentDescription = "Active Jobs"
+                                )
+                            }
+                        } else {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.FormatListBulleted,
+                                contentDescription = "Active Jobs"
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer
                 )
@@ -261,6 +286,19 @@ fun FileBrowserScreen(
         )
     }
 
+    // Active Jobs Sheet
+    if (uiState.showActiveJobsSheet) {
+        ActiveJobsBottomSheet(
+            activeJobs = uiState.activeJobs,
+            onDismiss = { viewModel.onDismissActiveJobsSheet() },
+            onCancelJob = { jobId -> viewModel.onCancelJob(jobId) },
+            onOpenFolder = { destPath ->
+                viewModel.onDismissActiveJobsSheet()
+                viewModel.onNavigateToPath(destPath)
+            }
+        )
+    }
+
     // Extraction Progress Dialog
     if (uiState.isExtracting) {
         ExtractionProgressDialog(
@@ -319,6 +357,154 @@ fun FileBrowserScreen(
             onDismiss = { viewModel.onDismissCreateArchiveDialog() },
             onCreate = { name -> viewModel.onCreateArchiveSubmit(name) }
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ActiveJobsBottomSheet(
+    activeJobs: List<ExtractionJobItem>,
+    onDismiss: () -> Unit,
+    onCancelJob: (UUID) -> Unit,
+    onOpenFolder: (String) -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+        ) {
+            Text(
+                text = "Active & Recent Extractions",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (activeJobs.isEmpty()) {
+                Text(
+                    text = "No active or recent jobs",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 24.dp)
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(300.dp)
+                ) {
+                    items(
+                        items = activeJobs,
+                        key = { it.id }
+                    ) { job ->
+                        ExtractionJobListItem(
+                            job = job,
+                            onCancelJob = { onCancelJob(job.id) },
+                            onOpenFolder = { onOpenFolder(job.destPath) }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+fun ExtractionJobListItem(
+    job: ExtractionJobItem,
+    onCancelJob: () -> Unit,
+    onOpenFolder: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = job.archiveName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+
+                if (job.isActive) {
+                    IconButton(onClick = onCancelJob) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel Job",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+                } else if (job.status == ExtractionJobStatus.SUCCEEDED && job.destPath.isNotEmpty()) {
+                    TextButton(onClick = onOpenFolder) {
+                        Text("Open folder")
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            when (job.status) {
+                ExtractionJobStatus.RUNNING, ExtractionJobStatus.ENQUEUED -> {
+                    LinearProgressIndicator(
+                        progress = { if (job.totalFiles > 0) job.percentage / 100f else 0f },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (job.totalFiles > 0) {
+                            "${job.currentFile}/${job.totalFiles} files (${job.percentage}%)"
+                        } else "Starting...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                ExtractionJobStatus.SUCCEEDED -> {
+                    Text(
+                        text = "Completed successfully",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                ExtractionJobStatus.FAILED -> {
+                    Text(
+                        text = "Failed: ${job.errorMessage ?: "Unknown error"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                ExtractionJobStatus.CANCELLED -> {
+                    Text(
+                        text = "Canceled",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
 }
 

@@ -15,11 +15,11 @@
 - [x] Real file system access and browser
 - [x] NDK integration (libarchive)
 - [x] Archive extraction (ZIP)
+- [x] Background extraction with notifications
 
 ## Next Steps
 - [ ] Archive creation
 - [ ] Password-protected archive creation
-- [ ] Background extraction with notifications
 - [ ] Settings screen
 
 ## Notes
@@ -30,5 +30,8 @@
 - File type icon detection with custom badged extension icon for archives
 - Long-press menu supporting Extract, Compress, Delete, Rename, and Details dialogs
 - NDK integrated with libarchive 3.7.7 via CMake 3.22 for API 24+ across arm64-v8a, armeabi-v7a, and x86_64
-- JNI bridge (`ArchiveNative`) supporting listing archive contents, standard extraction, and password-protected extraction
+- JNI bridge (`ArchiveNative`) supporting listing archive contents, standard extraction, password-protected extraction, and JNI progress callbacks (`extractArchiveWithProgress`)
+- Background extraction managed by WorkManager (`ExtractionWorker`) as a Foreground Service with persistent NotificationCompat notifications
+- Notification system includes ongoing extraction progress bar (current/total files, percentage), Cancel button action, completion notification with "Open folder" action, and failure error alerts
+- UI includes Active Jobs sheet accessible from TopAppBar displaying real-time job progress, cancellation controls, and navigation to extracted folders
 - Currently supported formats: ZIP (done), 7Z/RAR/TAR (next)
