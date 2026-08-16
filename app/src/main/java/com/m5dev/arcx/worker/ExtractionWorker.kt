@@ -10,16 +10,19 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.m5dev.arcx.domain.repository.FileRepository
+import com.m5dev.arcx.domain.repository.SettingsRepository
 import com.m5dev.arcx.notification.ExtractionNotificationHelper
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.flow.first
 import java.io.File
 
 @HiltWorker
 class ExtractionWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted params: WorkerParameters,
-    private val fileRepository: FileRepository
+    private val fileRepository: FileRepository,
+    private val settingsRepository: SettingsRepository
 ) : CoroutineWorker(context, params) {
 
     companion object {
@@ -38,6 +41,8 @@ class ExtractionWorker @AssistedInject constructor(
     }
 
     override suspend fun doWork(): Result {
+        val prefs = try { settingsRepository.userPreferencesFlow.first() } catch (e: Exception) { com.m5dev.arcx.domain.model.UserPreferences() }
+
         val archivePath = inputData.getString(KEY_ARCHIVE_PATH)
             ?: return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Missing archive path"))
         val destPath = inputData.getString(KEY_DEST_PATH)
@@ -84,21 +89,23 @@ class ExtractionWorker @AssistedInject constructor(
                 )
             )
 
-            val updatedNotification = ExtractionNotificationHelper.buildProgressNotification(
-                context = context,
-                workIdString = id.toString(),
-                archiveName = archiveName,
-                currentFile = current,
-                totalFiles = total,
-                percentage = percentage,
-                cancelPendingIntent = cancelPendingIntent
-            )
+            if (prefs.showExtractionNotifications) {
+                val updatedNotification = ExtractionNotificationHelper.buildProgressNotification(
+                    context = context,
+                    workIdString = id.toString(),
+                    archiveName = archiveName,
+                    currentFile = current,
+                    totalFiles = total,
+                    percentage = percentage,
+                    cancelPendingIntent = cancelPendingIntent
+                )
 
-            try {
-                androidx.core.app.NotificationManagerCompat.from(context)
-                    .notify(notificationId, updatedNotification)
-            } catch (e: SecurityException) {
-                // Ignore if notification permission is revoked
+                try {
+                    androidx.core.app.NotificationManagerCompat.from(context)
+                        .notify(notificationId, updatedNotification)
+                } catch (e: SecurityException) {
+                    // Ignore if notification permission is revoked
+                }
             }
 
             !isStopped
@@ -106,12 +113,16 @@ class ExtractionWorker @AssistedInject constructor(
 
         return extractResult.fold(
             onSuccess = {
-                ExtractionNotificationHelper.showSuccessNotification(
-                    context = context,
-                    notificationId = notificationId,
-                    archiveName = archiveName,
-                    destPath = destPath
-                )
+                if (prefs.showExtractionNotifications) {
+                    ExtractionNotificationHelper.showSuccessNotification(
+                        context = context,
+                        notificationId = notificationId,
+                        archiveName = archiveName,
+                        destPath = destPath,
+                        showSound = prefs.showCompletionSound,
+                        vibrate = prefs.vibrateOnCompletion
+                    )
+                }
                 Result.success(
                     workDataOf(
                         KEY_ARCHIVE_NAME to archiveName,
@@ -125,12 +136,14 @@ class ExtractionWorker @AssistedInject constructor(
                 if (isStopped) {
                     Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Extraction canceled"))
                 } else {
-                    ExtractionNotificationHelper.showErrorNotification(
-                        context = context,
-                        notificationId = notificationId,
-                        archiveName = archiveName,
-                        errorMessage = errorMsg
-                    )
+                    if (prefs.showExtractionNotifications) {
+                        ExtractionNotificationHelper.showErrorNotification(
+                            context = context,
+                            notificationId = notificationId,
+                            archiveName = archiveName,
+                            errorMessage = errorMsg
+                        )
+                    }
                     Result.failure(
                         workDataOf(
                             KEY_ARCHIVE_NAME to archiveName,
