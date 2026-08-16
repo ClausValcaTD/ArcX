@@ -9,6 +9,23 @@ enum class StorageLocation(val displayName: String) {
     DOWNLOADS("Downloads")
 }
 
+enum class OverwriteMode(val displayName: String) {
+    ASK("Ask"),
+    SKIP("Skip"),
+    REPLACE("Replace")
+}
+
+data class AdvancedExtractConfig(
+    val archiveItem: FileItem,
+    val destPath: String,
+    val overwriteMode: OverwriteMode = OverwriteMode.ASK,
+    val password: String = "",
+    val isEncrypted: Boolean = false,
+    val archiveContents: List<String> = emptyList(),
+    val selectedFiles: Set<String> = emptySet(),
+    val isLoadingContents: Boolean = false
+)
+
 enum class JobType {
     EXTRACTION,
     COMPRESSION
@@ -63,6 +80,10 @@ data class FileBrowserUiState(
     val hasStoragePermission: Boolean = false,
     val shouldShowPermissionExplanation: Boolean = false,
     val selectedFileForOptions: FileItem? = null,
+    val showExtractOptionsDialog: Boolean = false,
+    val extractOptionsFileItem: FileItem? = null,
+    val showAdvancedExtractDialog: Boolean = false,
+    val advancedExtractConfig: AdvancedExtractConfig? = null,
     val selectedItemForRename: FileItem? = null,
     val selectedItemForDelete: FileItem? = null,
     val selectedItemForDetails: FileItem? = null,
