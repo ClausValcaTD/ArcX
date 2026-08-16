@@ -18,11 +18,13 @@
 - [x] Background extraction with notifications
 - [x] Archive creation
 - [x] Password-protected archive creation
+- [x] Settings screen
 
 ## Next Steps
-- [ ] Settings screen
+- None
 
 ## Notes
+- Phase 1 complete — ready for beta testing
 - Using NotificationCompat for Android 7 compatibility
 - Permission strategy: `MANAGE_EXTERNAL_STORAGE` for Android 11+ (API 30+), `READ_EXTERNAL_STORAGE` and `WRITE_EXTERNAL_STORAGE` for Android 10 and below (API <= 29)
 - Graceful permission request and explanation dialog handling with automatic lifecycle refresh on resume
@@ -36,3 +38,8 @@
 - UI includes Active Jobs sheet accessible from TopAppBar displaying real-time job progress, cancellation controls, and navigation to extracted folders
 - Currently supported formats for extraction: ZIP, 7Z, RAR, TAR
 - Currently supported formats for creation: ZIP (ZipCrypto, AES-256), 7Z, TAR
+- Settings Screen supported using DataStore preferences:
+  - General: Default extract location (folder picker), Default compression format (ZIP/7Z/TAR), Default compression level (Store/Fast/Normal/Maximum), Ask before overwrite toggle
+  - Appearance: Theme (System/Light/Dark), Dynamic colors (Material You, hidden if Android < 12), Show hidden files toggle
+  - Notifications: Show extraction notifications toggle, Show completion sound toggle, Vibrate on completion toggle
+  - About: App version, Open source licenses dialog, Privacy policy dialog, GitHub repo link, Rate app action

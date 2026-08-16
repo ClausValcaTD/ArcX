@@ -4,11 +4,17 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.m5dev.arcx.domain.model.FileItem
 import com.m5dev.arcx.domain.model.FileType
+import com.m5dev.arcx.domain.model.UserPreferences
 import com.m5dev.arcx.domain.repository.FileRepository
+import com.m5dev.arcx.domain.repository.SettingsRepository
 import com.m5dev.arcx.presentation.ui.filebrowser.FileBrowserViewModel
 import com.m5dev.arcx.presentation.ui.filebrowser.StorageLocation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -32,6 +38,7 @@ class FileBrowserViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private lateinit var fakeRepository: FakeFileRepository
+    private lateinit var fakeSettingsRepository: FakeSettingsRepository
     private lateinit var viewModel: FileBrowserViewModel
     private lateinit var context: Context
 
@@ -40,7 +47,8 @@ class FileBrowserViewModelTest {
         Dispatchers.setMain(testDispatcher)
         context = ApplicationProvider.getApplicationContext()
         fakeRepository = FakeFileRepository()
-        viewModel = FileBrowserViewModel(fakeRepository, context)
+        fakeSettingsRepository = FakeSettingsRepository()
+        viewModel = FileBrowserViewModel(fakeRepository, fakeSettingsRepository, context)
     }
 
     @After
@@ -263,6 +271,22 @@ class FileBrowserViewModelTest {
         assertNotNull(finalState.snackbarMessage)
         assertTrue(finalState.snackbarMessage!!.contains("Compression started in background"))
     }
+}
+
+class FakeSettingsRepository : SettingsRepository {
+    private val _prefs = MutableStateFlow(UserPreferences())
+    override val userPreferencesFlow: Flow<UserPreferences> = _prefs.asStateFlow()
+
+    override suspend fun updateDefaultExtractLocation(path: String) { _prefs.update { it.copy(defaultExtractLocation = path) } }
+    override suspend fun updateDefaultCompressionFormat(format: String) { _prefs.update { it.copy(defaultCompressionFormat = format) } }
+    override suspend fun updateDefaultCompressionLevel(level: String) { _prefs.update { it.copy(defaultCompressionLevel = level) } }
+    override suspend fun updateAskBeforeOverwrite(ask: Boolean) { _prefs.update { it.copy(askBeforeOverwrite = ask) } }
+    override suspend fun updateTheme(theme: String) { _prefs.update { it.copy(theme = theme) } }
+    override suspend fun updateDynamicColors(enabled: Boolean) { _prefs.update { it.copy(dynamicColors = enabled) } }
+    override suspend fun updateShowHiddenFiles(show: Boolean) { _prefs.update { it.copy(showHiddenFiles = show) } }
+    override suspend fun updateShowExtractionNotifications(show: Boolean) { _prefs.update { it.copy(showExtractionNotifications = show) } }
+    override suspend fun updateShowCompletionSound(enabled: Boolean) { _prefs.update { it.copy(showCompletionSound = enabled) } }
+    override suspend fun updateVibrateOnCompletion(enabled: Boolean) { _prefs.update { it.copy(vibrateOnCompletion = enabled) } }
 }
 
 class FakeFileRepository : FileRepository {

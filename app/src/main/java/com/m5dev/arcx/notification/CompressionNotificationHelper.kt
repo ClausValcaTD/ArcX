@@ -77,7 +77,9 @@ object CompressionNotificationHelper {
         context: Context,
         notificationId: Int,
         archiveName: String,
-        destPath: String
+        destPath: String,
+        showSound: Boolean = true,
+        vibrate: Boolean = true
     ) {
         createNotificationChannels(context)
 
@@ -94,7 +96,11 @@ object CompressionNotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_COMPRESSION_RESULT)
+        var defaults = 0
+        if (showSound) defaults = defaults or NotificationCompat.DEFAULT_SOUND
+        if (vibrate) defaults = defaults or NotificationCompat.DEFAULT_VIBRATE
+
+        val notificationBuilder = NotificationCompat.Builder(context, CHANNEL_COMPRESSION_RESULT)
             .setContentTitle("Compression Complete")
             .setContentText("Created $archiveName successfully")
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
@@ -106,10 +112,16 @@ object CompressionNotificationHelper {
                 openPendingIntent
             )
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .build()
+
+        if (defaults != 0) {
+            notificationBuilder.setDefaults(defaults)
+        } else {
+            notificationBuilder.setSound(null)
+            notificationBuilder.setVibrate(longArrayOf(0L))
+        }
 
         try {
-            NotificationManagerCompat.from(context).notify(notificationId, notification)
+            NotificationManagerCompat.from(context).notify(notificationId, notificationBuilder.build())
         } catch (e: SecurityException) {
             // Permission might be denied
         }

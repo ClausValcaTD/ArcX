@@ -10,16 +10,19 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.m5dev.arcx.domain.repository.FileRepository
+import com.m5dev.arcx.domain.repository.SettingsRepository
 import com.m5dev.arcx.notification.CompressionNotificationHelper
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.flow.first
 import java.io.File
 
 @HiltWorker
 class CompressionWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted params: WorkerParameters,
-    private val fileRepository: FileRepository
+    private val fileRepository: FileRepository,
+    private val settingsRepository: SettingsRepository
 ) : CoroutineWorker(context, params) {
 
     companion object {
@@ -41,6 +44,8 @@ class CompressionWorker @AssistedInject constructor(
     }
 
     override suspend fun doWork(): Result {
+        val prefs = try { settingsRepository.userPreferencesFlow.first() } catch (e: Exception) { com.m5dev.arcx.domain.model.UserPreferences() }
+
         val sourcePaths = inputData.getStringArray(KEY_SOURCE_PATHS)
             ?: return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Missing source paths"))
         val destArchivePath = inputData.getString(KEY_DEST_ARCHIVE_PATH)
@@ -92,21 +97,23 @@ class CompressionWorker @AssistedInject constructor(
                 )
             )
 
-            val updatedNotification = CompressionNotificationHelper.buildProgressNotification(
-                context = context,
-                workIdString = id.toString(),
-                archiveName = archiveName,
-                currentFile = current,
-                totalFiles = total,
-                percentage = percentage,
-                cancelPendingIntent = cancelPendingIntent
-            )
+            if (prefs.showExtractionNotifications) {
+                val updatedNotification = CompressionNotificationHelper.buildProgressNotification(
+                    context = context,
+                    workIdString = id.toString(),
+                    archiveName = archiveName,
+                    currentFile = current,
+                    totalFiles = total,
+                    percentage = percentage,
+                    cancelPendingIntent = cancelPendingIntent
+                )
 
-            try {
-                androidx.core.app.NotificationManagerCompat.from(context)
-                    .notify(notificationId, updatedNotification)
-            } catch (e: SecurityException) {
-                // Ignore if notification permission is revoked
+                try {
+                    androidx.core.app.NotificationManagerCompat.from(context)
+                        .notify(notificationId, updatedNotification)
+                } catch (e: SecurityException) {
+                    // Ignore if notification permission is revoked
+                }
             }
 
             !isStopped
@@ -115,12 +122,16 @@ class CompressionWorker @AssistedInject constructor(
         return compressResult.fold(
             onSuccess = {
                 val parentPath = archiveFile.parentFile?.absolutePath ?: destArchivePath
-                CompressionNotificationHelper.showSuccessNotification(
-                    context = context,
-                    notificationId = notificationId,
-                    archiveName = archiveName,
-                    destPath = parentPath
-                )
+                if (prefs.showExtractionNotifications) {
+                    CompressionNotificationHelper.showSuccessNotification(
+                        context = context,
+                        notificationId = notificationId,
+                        archiveName = archiveName,
+                        destPath = parentPath,
+                        showSound = prefs.showCompletionSound,
+                        vibrate = prefs.vibrateOnCompletion
+                    )
+                }
                 Result.success(
                     workDataOf(
                         KEY_ARCHIVE_NAME to archiveName,
@@ -133,12 +144,14 @@ class CompressionWorker @AssistedInject constructor(
                 if (isStopped) {
                     Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Compression canceled"))
                 } else {
-                    CompressionNotificationHelper.showErrorNotification(
-                        context = context,
-                        notificationId = notificationId,
-                        archiveName = archiveName,
-                        errorMessage = errorMsg
-                    )
+                    if (prefs.showExtractionNotifications) {
+                        CompressionNotificationHelper.showErrorNotification(
+                            context = context,
+                            notificationId = notificationId,
+                            archiveName = archiveName,
+                            errorMessage = errorMsg
+                        )
+                    }
                     Result.failure(
                         workDataOf(
                             KEY_ARCHIVE_NAME to archiveName,

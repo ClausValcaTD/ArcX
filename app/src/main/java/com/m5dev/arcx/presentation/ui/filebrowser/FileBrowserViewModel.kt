@@ -8,7 +8,9 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.m5dev.arcx.domain.model.FileItem
+import com.m5dev.arcx.domain.model.UserPreferences
 import com.m5dev.arcx.domain.repository.FileRepository
+import com.m5dev.arcx.domain.repository.SettingsRepository
 import com.m5dev.arcx.worker.CompressionWorker
 import com.m5dev.arcx.worker.ExtractionWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -26,6 +29,7 @@ import javax.inject.Inject
 @HiltViewModel
 class FileBrowserViewModel @Inject constructor(
     private val fileRepository: FileRepository,
+    private val settingsRepository: SettingsRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -33,6 +37,8 @@ class FileBrowserViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(FileBrowserUiState())
     val uiState: StateFlow<FileBrowserUiState> = _uiState.asStateFlow()
+
+    private var currentUserPreferences = UserPreferences()
 
     init {
         val rootPath = fileRepository.getStorageRootPath()
@@ -42,7 +48,24 @@ class FileBrowserViewModel @Inject constructor(
                 folderNameStack = listOf(StorageLocation.INTERNAL_STORAGE.displayName)
             )
         }
+        observeUserPreferences()
         observeArchiveJobs()
+    }
+
+    private fun observeUserPreferences() {
+        viewModelScope.launch {
+            try {
+                settingsRepository.userPreferencesFlow.collect { prefs ->
+                    val previousShowHidden = currentUserPreferences.showHiddenFiles
+                    currentUserPreferences = prefs
+                    if (previousShowHidden != prefs.showHiddenFiles && _uiState.value.hasStoragePermission) {
+                        loadCurrentDirectory()
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore in tests
+            }
+        }
     }
 
     private fun observeArchiveJobs() {
@@ -264,7 +287,7 @@ class FileBrowserViewModel @Inject constructor(
                 val listResult = fileRepository.listArchiveContents(fileItem.path)
                 var isEncrypted = false
                 listResult.fold(
-                    onSuccess = { /* List success, likely not password protected or standard archive */ },
+                    onSuccess = { /* List success */ },
                     onFailure = { error ->
                         val errMsg = error.localizedMessage ?: ""
                         if (errMsg.contains("passphrase", ignoreCase = true) ||
@@ -295,7 +318,13 @@ class FileBrowserViewModel @Inject constructor(
     private fun enqueueExtractionWorker(fileItem: FileItem, password: String?) {
         val targetDirName = fileItem.name.substringBeforeLast(".")
         val currentPath = _uiState.value.currentPath
-        val destPath = "$currentPath/$targetDirName"
+        val defaultExtractLoc = currentUserPreferences.defaultExtractLocation
+        val baseDestDir = if (defaultExtractLoc.isNotBlank() && File(defaultExtractLoc).exists()) {
+            defaultExtractLoc
+        } else {
+            currentPath
+        }
+        val destPath = "$baseDestDir/$targetDirName"
 
         try {
             val workRequest = OneTimeWorkRequestBuilder<ExtractionWorker>()
@@ -399,7 +428,9 @@ class FileBrowserViewModel @Inject constructor(
         val defaultName = rawName.substringBeforeLast(".")
         val config = CompressionConfig(
             sourcePaths = paths,
-            defaultName = if (defaultName.isBlank()) "Archive" else defaultName
+            defaultName = if (defaultName.isBlank()) "Archive" else defaultName,
+            format = currentUserPreferences.defaultCompressionFormat,
+            compressionLevel = currentUserPreferences.defaultCompressionLevel
         )
         _uiState.update {
             it.copy(compressionConfig = config)
@@ -443,7 +474,7 @@ class FileBrowserViewModel @Inject constructor(
             val currentFiles = fileRepository.getFilesForPath(currentPath).getOrDefault(emptyList())
             val exists = currentFiles.any { it.name.equals(fullArchiveName, ignoreCase = true) }
 
-            if (exists) {
+            if (exists && currentUserPreferences.askBeforeOverwrite) {
                 _uiState.update {
                     it.copy(
                         compressionConfig = null,
@@ -452,6 +483,9 @@ class FileBrowserViewModel @Inject constructor(
                     )
                 }
             } else {
+                if (exists) {
+                    File(destArchivePath).delete()
+                }
                 _uiState.update { it.copy(compressionConfig = null) }
                 enqueueCompressionWorker(finalConfig, destArchivePath, fullArchiveName)
             }
@@ -476,7 +510,6 @@ class FileBrowserViewModel @Inject constructor(
         val currentPath = _uiState.value.currentPath
         val destArchivePath = "$currentPath/$fullArchiveName"
 
-        // Delete existing file before overwriting
         File(destArchivePath).delete()
 
         enqueueCompressionWorker(config, destArchivePath, fullArchiveName)
@@ -639,9 +672,15 @@ class FileBrowserViewModel @Inject constructor(
             val result = fileRepository.getFilesForPath(path)
             result.fold(
                 onSuccess = { fileList ->
+                    val showHidden = currentUserPreferences.showHiddenFiles
+                    val filteredList = if (!showHidden) {
+                        fileList.filter { !it.name.startsWith(".") }
+                    } else {
+                        fileList
+                    }
                     _uiState.update {
                         it.copy(
-                            items = fileList,
+                            items = filteredList,
                             isLoading = false,
                             errorMessage = null
                         )

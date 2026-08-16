@@ -83,7 +83,9 @@ object ExtractionNotificationHelper {
         context: Context,
         notificationId: Int,
         archiveName: String,
-        destPath: String
+        destPath: String,
+        showSound: Boolean = true,
+        vibrate: Boolean = true
     ) {
         createNotificationChannels(context)
 
@@ -100,7 +102,11 @@ object ExtractionNotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_EXTRACTION_RESULT)
+        var defaults = 0
+        if (showSound) defaults = defaults or NotificationCompat.DEFAULT_SOUND
+        if (vibrate) defaults = defaults or NotificationCompat.DEFAULT_VIBRATE
+
+        val notificationBuilder = NotificationCompat.Builder(context, CHANNEL_EXTRACTION_RESULT)
             .setContentTitle("Extraction Complete")
             .setContentText("Extracted $archiveName successfully")
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
@@ -112,12 +118,18 @@ object ExtractionNotificationHelper {
                 openPendingIntent
             )
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .build()
+
+        if (defaults != 0) {
+            notificationBuilder.setDefaults(defaults)
+        } else {
+            notificationBuilder.setSound(null)
+            notificationBuilder.setVibrate(longArrayOf(0L))
+        }
 
         try {
-            NotificationManagerCompat.from(context).notify(notificationId, notification)
+            NotificationManagerCompat.from(context).notify(notificationId, notificationBuilder.build())
         } catch (e: SecurityException) {
-            // Permission might be denied on Android 13+ if user didn't grant POST_NOTIFICATIONS
+            // Permission might be denied on Android 13+
         }
     }
 
