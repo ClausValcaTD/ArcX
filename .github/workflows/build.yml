@@ -1,11 +1,13 @@
-# .github/workflows/build.yml
-name: Build ArcX
+# .github/workflows/release.yml
+name: Release ArcX
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., 0.1.0)'
+        required: true
+        default: '0.1.0'
 
 jobs:
   build:
@@ -40,8 +42,28 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
       
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          name: arcx-debug
-          path: app/build/outputs/apk/debug/*.apk
+          tag_name: v${{ github.event.inputs.version }}
+          name: ArcX v${{ github.event.inputs.version }}
+          body: |
+            ## ArcX v${{ github.event.inputs.version }}
+            
+            ### Features
+            - Extract: ZIP, 7Z, RAR, TAR
+            - Create: ZIP (AES-256), 7Z, TAR
+            - Background extraction with notifications
+            - Material 3 UI with dynamic colors
+            - Settings with DataStore
+            
+            ### Supported Android
+            - Android 7.0+ (API 24+)
+            
+            ### Note
+            This is a debug build for beta testing.
+          files: app/build/outputs/apk/debug/app-debug.apk
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
