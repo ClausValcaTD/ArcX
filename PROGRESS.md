@@ -14,17 +14,23 @@
 - [x] Storage permissions handling
 - [x] Real file system access and browser
 - [x] NDK integration (libarchive)
-- [x] Archive extraction (ZIP)
+- [x] Archive extraction (ZIP, 7Z, RAR, TAR)
 - [x] Background extraction with notifications
-- [x] Archive creation
-- [x] Password-protected archive creation
+- [x] Archive creation (ZIP, 7Z, TAR)
+- [x] Password-protected archive creation (ZipCrypto, AES-256)
 - [x] Settings screen
+- [x] GPL v3 LICENSE added
+- [x] README.md with full documentation
+- [x] GitHub issue templates added
+- [x] Adaptive and legacy app icons added
+- [x] ProGuard rules and release minification configured
+- [x] All unit tests passing
 
-## Next Steps
-- None
+## Release Status
+- **Ready for v0.1.0-beta release**
 
 ## Notes
-- Phase 1 complete — ready for beta testing
+- Phase 1 complete — ready for beta release
 - Using NotificationCompat for Android 7 compatibility
 - Permission strategy: `MANAGE_EXTERNAL_STORAGE` for Android 11+ (API 30+), `READ_EXTERNAL_STORAGE` and `WRITE_EXTERNAL_STORAGE` for Android 10 and below (API <= 29)
 - Graceful permission request and explanation dialog handling with automatic lifecycle refresh on resume
