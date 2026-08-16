@@ -1,34 +1,55 @@
 package com.m5dev.arcx.presentation.ui.filebrowser
 
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.SdCard
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -42,12 +63,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,11 +78,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.m5dev.arcx.domain.model.FileItem
+import com.m5dev.arcx.domain.model.FileType
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,6 +101,45 @@ fun FileBrowserScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Permission Launchers
+    val manageStorageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        val hasPermission = checkStoragePermission(context)
+        viewModel.onPermissionStatusUpdated(hasPermission)
+    }
+
+    val permissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions.values.all { it }
+        viewModel.onPermissionStatusUpdated(granted)
+    }
+
+    fun launchPermissionRequest() {
+        requestStoragePermission(
+            context = context,
+            manageStorageLauncher = manageStorageLauncher,
+            permissionsLauncher = permissionsLauncher
+        )
+    }
+
+    // Lifecycle observer to check storage permission when app resumes
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val hasPermission = checkStoragePermission(context)
+                viewModel.onPermissionStatusUpdated(hasPermission)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     BackHandler(enabled = uiState.canNavigateUp) {
         viewModel.onNavigateUp()
@@ -122,15 +194,17 @@ fun FileBrowserScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { viewModel.onFabClick() },
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Create New Archive"
-                )
+            if (uiState.hasStoragePermission) {
+                FloatingActionButton(
+                    onClick = { viewModel.onFabClick() },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Create New Archive"
+                    )
+                }
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -140,40 +214,90 @@ fun FileBrowserScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (uiState.items.isEmpty()) {
-                EmptyFolderView()
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(
-                        items = uiState.items,
-                        key = { it.id }
-                    ) { item ->
-                        FileListItem(
-                            fileItem = item,
-                            onClick = {
-                                if (item.isFolder) {
-                                    viewModel.onFolderClick(item)
-                                } else {
-                                    viewModel.onFileClick(item)
-                                }
-                            }
-                        )
+            when {
+                !uiState.hasStoragePermission -> {
+                    PermissionDeniedView(
+                        onRequestPermission = { launchPermissionRequest() }
+                    )
+                }
+                uiState.isLoading -> {
+                    LoadingView()
+                }
+                uiState.errorMessage != null -> {
+                    ErrorView(
+                        message = uiState.errorMessage ?: "Unknown error",
+                        onRetry = { viewModel.refreshCurrentDirectory() }
+                    )
+                }
+                uiState.items.isEmpty() -> {
+                    EmptyFolderView()
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(
+                            items = uiState.items,
+                            key = { it.id }
+                        ) { item ->
+                            FileListItem(
+                                fileItem = item,
+                                onClick = { viewModel.onFileClick(item) },
+                                onLongClick = { viewModel.onFileLongClick(item) }
+                            )
+                        }
                     }
                 }
             }
         }
     }
 
-    // Modal Bottom Sheet for File Options
+    // Modal Bottom Sheet for Options
     uiState.selectedFileForOptions?.let { fileItem ->
         FileOptionsBottomSheet(
             fileItem = fileItem,
             onDismiss = { viewModel.onDismissFileOptions() },
-            onActionClick = { actionName ->
-                viewModel.onDismissFileOptions()
-                viewModel.onCreateArchiveSubmit("$actionName for ${fileItem.name}")
+            onExtract = { viewModel.onOptionActionExtract(fileItem) },
+            onCompress = { viewModel.onOptionActionCompress(fileItem) },
+            onDelete = { viewModel.onOptionActionDelete(fileItem) },
+            onRename = { viewModel.onOptionActionRename(fileItem) },
+            onDetails = { viewModel.onOptionActionDetails(fileItem) }
+        )
+    }
+
+    // Delete Confirmation Dialog
+    uiState.selectedItemForDelete?.let { item ->
+        DeleteConfirmationDialog(
+            item = item,
+            onDismiss = { viewModel.onDismissDeleteDialog() },
+            onConfirm = { viewModel.onConfirmDelete() }
+        )
+    }
+
+    // Rename Dialog
+    uiState.selectedItemForRename?.let { item ->
+        RenameDialog(
+            item = item,
+            onDismiss = { viewModel.onDismissRenameDialog() },
+            onRename = { newName -> viewModel.onConfirmRename(newName) }
+        )
+    }
+
+    // Details Dialog
+    uiState.selectedItemForDetails?.let { item ->
+        FileDetailsDialog(
+            item = item,
+            onDismiss = { viewModel.onDismissDetailsDialog() }
+        )
+    }
+
+    // Permission Explanation Dialog
+    if (uiState.shouldShowPermissionExplanation) {
+        PermissionExplanationDialog(
+            onDismiss = { viewModel.onDismissPermissionExplanation() },
+            onGrant = {
+                viewModel.onRequestPermissionClick()
+                launchPermissionRequest()
             }
         )
     }
@@ -187,28 +311,27 @@ fun FileBrowserScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FileListItem(
     fileItem: FileItem,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
-    val icon: ImageVector
-    val iconTint = if (fileItem.isFolder) {
-        MaterialTheme.colorScheme.primary
-    } else if (isArchiveExtension(fileItem.extension)) {
-        MaterialTheme.colorScheme.tertiary
-    } else {
-        MaterialTheme.colorScheme.secondary
-    }
-
-    icon = when {
-        fileItem.isFolder -> Icons.Default.Folder
-        isArchiveExtension(fileItem.extension) -> Icons.Default.Archive
-        else -> Icons.AutoMirrored.Filled.InsertDriveFile
+    val iconTint = when (fileItem.fileType) {
+        FileType.FOLDER -> MaterialTheme.colorScheme.primary
+        FileType.ARCHIVE -> MaterialTheme.colorScheme.tertiary
+        FileType.IMAGE -> MaterialTheme.colorScheme.secondary
+        FileType.VIDEO -> MaterialTheme.colorScheme.error
+        FileType.AUDIO -> MaterialTheme.colorScheme.primary
+        FileType.OTHER -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.combinedClickable(
+            onClick = onClick,
+            onLongClick = onLongClick
+        ),
         headlineContent = {
             Text(
                 text = fileItem.name,
@@ -221,22 +344,116 @@ fun FileListItem(
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(text = fileItem.formattedDate)
-                if (fileItem.size.isNotEmpty()) {
-                    Text(text = "•")
-                    Text(text = fileItem.size)
+                if (fileItem.formattedDate.isNotEmpty()) {
+                    Text(text = fileItem.formattedDate)
+                }
+                if (fileItem.formattedSize.isNotEmpty()) {
+                    if (fileItem.formattedDate.isNotEmpty()) {
+                        Text(text = "•")
+                    }
+                    Text(text = fileItem.formattedSize)
                 }
             }
         },
         leadingContent = {
-            Icon(
-                imageVector = icon,
-                contentDescription = if (fileItem.isFolder) "Folder" else "File",
-                tint = iconTint,
-                modifier = Modifier.size(32.dp)
+            FileTypeIcon(
+                fileItem = fileItem,
+                tint = iconTint
             )
         }
     )
+}
+
+@Composable
+fun FileTypeIcon(
+    fileItem: FileItem,
+    tint: Color
+) {
+    when (fileItem.fileType) {
+        FileType.FOLDER -> {
+            Icon(
+                imageVector = Icons.Default.Folder,
+                contentDescription = "Folder",
+                tint = tint,
+                modifier = Modifier.size(36.dp)
+            )
+        }
+        FileType.ARCHIVE -> {
+            ArchiveIconWithBadge(
+                extension = fileItem.extension,
+                tint = tint,
+                modifier = Modifier.size(36.dp)
+            )
+        }
+        FileType.IMAGE -> {
+            Icon(
+                imageVector = Icons.Default.Image,
+                contentDescription = "Image",
+                tint = tint,
+                modifier = Modifier.size(36.dp)
+            )
+        }
+        FileType.VIDEO -> {
+            Icon(
+                imageVector = Icons.Default.Movie,
+                contentDescription = "Video",
+                tint = tint,
+                modifier = Modifier.size(36.dp)
+            )
+        }
+        FileType.AUDIO -> {
+            Icon(
+                imageVector = Icons.Default.AudioFile,
+                contentDescription = "Audio",
+                tint = tint,
+                modifier = Modifier.size(36.dp)
+            )
+        }
+        FileType.OTHER -> {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
+                contentDescription = "File",
+                tint = tint,
+                modifier = Modifier.size(36.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun ArchiveIconWithBadge(
+    extension: String,
+    modifier: Modifier = Modifier,
+    tint: Color = MaterialTheme.colorScheme.tertiary
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Archive,
+            contentDescription = "Archive",
+            tint = tint,
+            modifier = Modifier.fillMaxSize()
+        )
+        if (extension.isNotBlank()) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 2.dp, y = 2.dp),
+                shape = RoundedCornerShape(4.dp),
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+            ) {
+                Text(
+                    text = extension.uppercase().take(4),
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 2.dp, vertical = 0.5.dp)
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -262,12 +479,16 @@ fun FileBrowserBottomBar(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun FileOptionsBottomSheet(
     fileItem: FileItem,
     onDismiss: () -> Unit,
-    onActionClick: (String) -> Unit
+    onExtract: () -> Unit,
+    onCompress: () -> Unit,
+    onDelete: () -> Unit,
+    onRename: () -> Unit,
+    onDetails: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
 
@@ -280,18 +501,15 @@ fun FileOptionsBottomSheet(
                 .fillMaxWidth()
                 .padding(bottom = 24.dp)
         ) {
-            // Header info
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = if (isArchiveExtension(fileItem.extension)) Icons.Default.Archive else Icons.AutoMirrored.Filled.InsertDriveFile,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(36.dp)
+                FileTypeIcon(
+                    fileItem = fileItem,
+                    tint = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.width(16.dp))
                 Column {
@@ -303,7 +521,7 @@ fun FileOptionsBottomSheet(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "${fileItem.size} • ${fileItem.formattedDate}",
+                        text = "${fileItem.formattedSize} • ${fileItem.formattedDate}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -312,41 +530,261 @@ fun FileOptionsBottomSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Actions
-            if (isArchiveExtension(fileItem.extension)) {
+            if (fileItem.fileType == FileType.ARCHIVE) {
                 ListItem(
-                    headlineContent = { Text("Extract Here") },
+                    headlineContent = { Text("Extract") },
                     leadingContent = { Icon(Icons.Outlined.FolderZip, contentDescription = null) },
-                    modifier = Modifier.clickable { onActionClick("Extract Here") }
-                )
-                ListItem(
-                    headlineContent = { Text("Extract to folder...") },
-                    leadingContent = { Icon(Icons.Default.Folder, contentDescription = null) },
-                    modifier = Modifier.clickable { onActionClick("Extract to folder") }
-                )
-            } else {
-                ListItem(
-                    headlineContent = { Text("Compress to Archive") },
-                    leadingContent = { Icon(Icons.Outlined.Compress, contentDescription = null) },
-                    modifier = Modifier.clickable { onActionClick("Compress to Archive") }
+                    modifier = Modifier.combinedClickable(onClick = onExtract)
                 )
             }
 
             ListItem(
-                headlineContent = { Text("Share") },
-                leadingContent = { Icon(Icons.Outlined.Share, contentDescription = null) },
-                modifier = Modifier.clickable { onActionClick("Share") }
+                headlineContent = { Text("Compress") },
+                leadingContent = { Icon(Icons.Outlined.Compress, contentDescription = null) },
+                modifier = Modifier.combinedClickable(onClick = onCompress)
             )
+
             ListItem(
-                headlineContent = { Text("File Properties") },
-                leadingContent = { Icon(Icons.Outlined.Info, contentDescription = null) },
-                modifier = Modifier.clickable { onActionClick("File Properties") }
+                headlineContent = { Text("Rename") },
+                leadingContent = { Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = null) },
+                modifier = Modifier.combinedClickable(onClick = onRename)
             )
+
+            ListItem(
+                headlineContent = { Text("Details") },
+                leadingContent = { Icon(Icons.Outlined.Info, contentDescription = null) },
+                modifier = Modifier.combinedClickable(onClick = onDetails)
+            )
+
             ListItem(
                 headlineContent = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                 leadingContent = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                modifier = Modifier.clickable { onActionClick("Delete") }
+                modifier = Modifier.combinedClickable(onClick = onDelete)
             )
+        }
+    }
+}
+
+@Composable
+fun DeleteConfirmationDialog(
+    item: FileItem,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "Delete ${if (item.isFolder) "Folder" else "File"}") },
+        text = {
+            Text(text = "Are you sure you want to delete \"${item.name}\"? This action cannot be undone.")
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Delete", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun RenameDialog(
+    item: FileItem,
+    onDismiss: () -> Unit,
+    onRename: (String) -> Unit
+) {
+    var newName by remember { mutableStateOf(item.name) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "Rename") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (newName.isNotBlank()) {
+                        onRename(newName.trim())
+                    }
+                }
+            ) {
+                Text("Rename")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun FileDetailsDialog(
+    item: FileItem,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "File Details") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DetailRow(label = "Name", value = item.name)
+                DetailRow(label = "Path", value = item.path)
+                DetailRow(label = "Type", value = if (item.isFolder) "Folder" else item.fileType.name)
+                if (item.extension.isNotEmpty()) {
+                    DetailRow(label = "Extension", value = item.extension.uppercase())
+                }
+                DetailRow(label = "Size", value = item.formattedSize)
+                if (item.lastModifiedTimestamp > 0) {
+                    DetailRow(label = "Modified", value = item.formattedDate)
+                }
+                if (item.itemCount != null) {
+                    DetailRow(label = "Items", value = "${item.itemCount}")
+                }
+                DetailRow(
+                    label = "Permissions",
+                    value = "${if (item.canRead) "Read" else ""}${if (item.canRead && item.canWrite) " / " else ""}${if (item.canWrite) "Write" else ""}"
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+}
+
+@Composable
+private fun DetailRow(label: String, value: String) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+fun PermissionExplanationDialog(
+    onDismiss: () -> Unit,
+    onGrant: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Security, contentDescription = null) },
+        title = { Text(text = "Storage Permission Required") },
+        text = {
+            Text(text = "ArcX needs access to device storage to read, extract, compress, and manage your files. Please grant storage permissions to continue.")
+        },
+        confirmButton = {
+            Button(onClick = onGrant) {
+                Text("Grant Permission")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun PermissionDeniedView(
+    onRequestPermission: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Security,
+            contentDescription = null,
+            modifier = Modifier.size(64.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "Storage Access Required",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "ArcX requires storage permissions to display files, extract archives, and compress data.",
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(onClick = onRequestPermission) {
+            Text("Grant Storage Permission")
+        }
+    }
+}
+
+@Composable
+fun LoadingView() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator()
+    }
+}
+
+@Composable
+fun ErrorView(
+    message: String,
+    onRetry: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "Unable to read directory",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.error
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(onClick = onRetry) {
+            Text("Retry")
         }
     }
 }
@@ -421,6 +859,38 @@ fun EmptyFolderView() {
     }
 }
 
-private fun isArchiveExtension(extension: String): Boolean {
-    return extension.lowercase() in listOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz", "iso", "tgz")
+fun checkStoragePermission(context: Context): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Environment.isExternalStorageManager()
+    } else {
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+}
+
+fun requestStoragePermission(
+    context: Context,
+    manageStorageLauncher: androidx.activity.result.ActivityResultLauncher<Intent>,
+    permissionsLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>
+) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        try {
+            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                data = Uri.parse("package:${context.packageName}")
+            }
+            manageStorageLauncher.launch(intent)
+        } catch (e: Exception) {
+            val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+            manageStorageLauncher.launch(intent)
+        }
+    } else {
+        permissionsLauncher.launch(
+            arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+        )
+    }
 }

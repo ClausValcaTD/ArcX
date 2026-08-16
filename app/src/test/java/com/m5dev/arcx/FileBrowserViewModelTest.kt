@@ -1,20 +1,42 @@
 package com.m5dev.arcx
 
+import com.m5dev.arcx.domain.model.FileItem
+import com.m5dev.arcx.domain.model.FileType
+import com.m5dev.arcx.domain.repository.FileRepository
 import com.m5dev.arcx.presentation.ui.filebrowser.FileBrowserViewModel
 import com.m5dev.arcx.presentation.ui.filebrowser.StorageLocation
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class FileBrowserViewModelTest {
 
+    private val testDispatcher = StandardTestDispatcher()
+    private lateinit var fakeRepository: FakeFileRepository
     private lateinit var viewModel: FileBrowserViewModel
 
     @Before
     fun setup() {
-        viewModel = FileBrowserViewModel()
+        Dispatchers.setMain(testDispatcher)
+        fakeRepository = FakeFileRepository()
+        viewModel = FileBrowserViewModel(fakeRepository)
+    }
+
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
     }
 
     @Test
@@ -24,37 +46,188 @@ class FileBrowserViewModelTest {
         assertEquals("/storage/emulated/0", state.currentPath)
         assertEquals("Internal Storage", state.currentFolderName)
         assertFalse(state.canNavigateUp)
-        assertTrue(state.items.isNotEmpty())
+        assertFalse(state.hasStoragePermission)
     }
 
     @Test
-    fun switchStorageLocation_updatesState() {
+    fun permissionStatusGranted_loadsDirectoryFiles() = runTest {
+        viewModel.onPermissionStatusUpdated(true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.hasStoragePermission)
+        assertFalse(state.isLoading)
+        assertEquals(2, state.items.size)
+        assertEquals("Documents", state.items[0].name)
+    }
+
+    @Test
+    fun switchStorageLocation_updatesPathAndLoadsFiles() = runTest {
+        viewModel.onPermissionStatusUpdated(true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
         viewModel.onStorageLocationSelected(StorageLocation.DOWNLOADS)
+        testDispatcher.scheduler.advanceUntilIdle()
+
         val state = viewModel.uiState.value
         assertEquals(StorageLocation.DOWNLOADS, state.selectedLocation)
         assertEquals("/storage/emulated/0/Download", state.currentPath)
         assertEquals("Downloads", state.currentFolderName)
-        assertFalse(state.canNavigateUp)
-        assertTrue(state.items.isNotEmpty())
+        assertEquals(1, state.items.size)
+        assertEquals("sample.zip", state.items[0].name)
     }
 
     @Test
-    fun folderNavigation_and_navigateUp() {
-        val initialItems = viewModel.uiState.value.items
-        val folder = initialItems.first { it.isFolder }
+    fun folderNavigation_and_navigateUp() = runTest {
+        viewModel.onPermissionStatusUpdated(true)
+        testDispatcher.scheduler.advanceUntilIdle()
 
+        val folder = viewModel.uiState.value.items.first { it.isFolder }
         viewModel.onFolderClick(folder)
+        testDispatcher.scheduler.advanceUntilIdle()
 
         val updatedState = viewModel.uiState.value
-        assertEquals(folder.path, updatedState.currentPath)
-        assertEquals(folder.name, updatedState.currentFolderName)
+        assertEquals("/storage/emulated/0/Documents", updatedState.currentPath)
+        assertEquals("Documents", updatedState.currentFolderName)
         assertTrue(updatedState.canNavigateUp)
 
         val navigatedBack = viewModel.onNavigateUp()
-        assertTrue(navigatedBack)
+        testDispatcher.scheduler.advanceUntilIdle()
 
+        assertTrue(navigatedBack)
         val finalState = viewModel.uiState.value
         assertEquals("/storage/emulated/0", finalState.currentPath)
         assertFalse(finalState.canNavigateUp)
     }
+
+    @Test
+    fun deleteFile_removesItemAndShowsSnackbar() = runTest {
+        viewModel.onPermissionStatusUpdated(true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val itemToDelete = viewModel.uiState.value.items.first { !it.isFolder }
+        viewModel.onOptionActionDelete(itemToDelete)
+
+        assertEquals(itemToDelete, viewModel.uiState.value.selectedItemForDelete)
+
+        viewModel.onConfirmDelete()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.selectedItemForDelete)
+        assertNotNull(viewModel.uiState.value.snackbarMessage)
+        assertTrue(viewModel.uiState.value.snackbarMessage!!.contains("Deleted"))
+    }
+
+    @Test
+    fun renameFile_updatesItemAndShowsSnackbar() = runTest {
+        viewModel.onPermissionStatusUpdated(true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val itemToRename = viewModel.uiState.value.items.first { !it.isFolder }
+        viewModel.onOptionActionRename(itemToRename)
+
+        assertEquals(itemToRename, viewModel.uiState.value.selectedItemForRename)
+
+        viewModel.onConfirmRename("renamed_file.txt")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.selectedItemForRename)
+        assertNotNull(viewModel.uiState.value.snackbarMessage)
+        assertTrue(viewModel.uiState.value.snackbarMessage!!.contains("Renamed"))
+    }
+}
+
+class FakeFileRepository : FileRepository {
+
+    private val filesMap = mutableMapOf<String, MutableList<FileItem>>(
+        "/storage/emulated/0" to mutableListOf(
+            FileItem(
+                id = "/storage/emulated/0/Documents",
+                name = "Documents",
+                path = "/storage/emulated/0/Documents",
+                isFolder = true,
+                sizeInBytes = 0,
+                formattedSize = "2 items",
+                lastModifiedTimestamp = 1000L,
+                formattedDate = "Jan 01, 2024",
+                extension = "",
+                fileType = FileType.FOLDER,
+                itemCount = 2
+            ),
+            FileItem(
+                id = "/storage/emulated/0/archive.zip",
+                name = "archive.zip",
+                path = "/storage/emulated/0/archive.zip",
+                isFolder = false,
+                sizeInBytes = 1024,
+                formattedSize = "1.0 KB",
+                lastModifiedTimestamp = 2000L,
+                formattedDate = "Jan 02, 2024",
+                extension = "zip",
+                fileType = FileType.ARCHIVE
+            )
+        ),
+        "/storage/emulated/0/Documents" to mutableListOf(
+            FileItem(
+                id = "/storage/emulated/0/Documents/notes.txt",
+                name = "notes.txt",
+                path = "/storage/emulated/0/Documents/notes.txt",
+                isFolder = false,
+                sizeInBytes = 500,
+                formattedSize = "500 B",
+                lastModifiedTimestamp = 3000L,
+                formattedDate = "Jan 03, 2024",
+                extension = "txt",
+                fileType = FileType.OTHER
+            )
+        ),
+        "/storage/emulated/0/Download" to mutableListOf(
+            FileItem(
+                id = "/storage/emulated/0/Download/sample.zip",
+                name = "sample.zip",
+                path = "/storage/emulated/0/Download/sample.zip",
+                isFolder = false,
+                sizeInBytes = 2048,
+                formattedSize = "2.0 KB",
+                lastModifiedTimestamp = 4000L,
+                formattedDate = "Jan 04, 2024",
+                extension = "zip",
+                fileType = FileType.ARCHIVE
+            )
+        )
+    )
+
+    override suspend fun getFilesForPath(path: String): Result<List<FileItem>> {
+        val list = filesMap[path] ?: mutableListOf()
+        return Result.success(list)
+    }
+
+    override suspend fun deleteFile(path: String): Result<Boolean> {
+        filesMap.values.forEach { list ->
+            list.removeAll { it.path == path }
+        }
+        return Result.success(true)
+    }
+
+    override suspend fun renameFile(path: String, newName: String): Result<FileItem> {
+        for ((_, list) in filesMap) {
+            val index = list.indexOfFirst { it.path == path }
+            if (index != -1) {
+                val old = list[index]
+                val updatedPath = old.path.substringBeforeLast('/') + "/" + newName
+                val updated = old.copy(
+                    id = updatedPath,
+                    name = newName,
+                    path = updatedPath
+                )
+                list[index] = updated
+                return Result.success(updated)
+            }
+        }
+        return Result.failure(Exception("File not found"))
+    }
+
+    override fun getStorageRootPath(): String = "/storage/emulated/0"
+
+    override fun getDownloadsPath(): String = "/storage/emulated/0/Download"
 }
