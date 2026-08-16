@@ -8,4 +8,6 @@ interface FileRepository {
     suspend fun renameFile(path: String, newName: String): Result<FileItem>
     fun getStorageRootPath(): String
     fun getDownloadsPath(): String
+    suspend fun extractArchive(archivePath: String, destPath: String, password: String? = null): Result<Boolean>
+    suspend fun listArchiveContents(archivePath: String): Result<List<String>>
 }

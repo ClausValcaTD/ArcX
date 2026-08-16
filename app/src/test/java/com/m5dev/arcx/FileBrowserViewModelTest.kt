@@ -57,7 +57,7 @@ class FileBrowserViewModelTest {
         val state = viewModel.uiState.value
         assertTrue(state.hasStoragePermission)
         assertFalse(state.isLoading)
-        assertEquals(2, state.items.size)
+        assertEquals(4, state.items.size)
         assertEquals("Documents", state.items[0].name)
     }
 
@@ -105,7 +105,7 @@ class FileBrowserViewModelTest {
         viewModel.onPermissionStatusUpdated(true)
         testDispatcher.scheduler.advanceUntilIdle()
 
-        val itemToDelete = viewModel.uiState.value.items.first { !it.isFolder }
+        val itemToDelete = viewModel.uiState.value.items.first { !it.isFolder && it.extension == "pdf" }
         viewModel.onOptionActionDelete(itemToDelete)
 
         assertEquals(itemToDelete, viewModel.uiState.value.selectedItemForDelete)
@@ -123,17 +123,60 @@ class FileBrowserViewModelTest {
         viewModel.onPermissionStatusUpdated(true)
         testDispatcher.scheduler.advanceUntilIdle()
 
-        val itemToRename = viewModel.uiState.value.items.first { !it.isFolder }
+        val itemToRename = viewModel.uiState.value.items.first { !it.isFolder && it.extension == "pdf" }
         viewModel.onOptionActionRename(itemToRename)
 
         assertEquals(itemToRename, viewModel.uiState.value.selectedItemForRename)
 
-        viewModel.onConfirmRename("renamed_file.txt")
+        viewModel.onConfirmRename("renamed_file.pdf")
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertNull(viewModel.uiState.value.selectedItemForRename)
         assertNotNull(viewModel.uiState.value.snackbarMessage)
         assertTrue(viewModel.uiState.value.snackbarMessage!!.contains("Renamed"))
+    }
+
+    @Test
+    fun extractArchive_success_updatesStateAndShowsSnackbar() = runTest {
+        viewModel.onPermissionStatusUpdated(true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val archiveItem = viewModel.uiState.value.items.first { it.name == "archive.zip" }
+        viewModel.onOptionActionExtract(archiveItem)
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertFalse(state.isExtracting)
+        assertNull(state.extractingFileName)
+        assertNotNull(state.snackbarMessage)
+        assertTrue(state.snackbarMessage!!.contains("Extracted to archive"))
+    }
+
+    @Test
+    fun extractEncryptedArchive_withoutPassword_triggersPasswordPrompt() = runTest {
+        viewModel.onPermissionStatusUpdated(true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val protectedArchive = viewModel.uiState.value.items.first { it.name == "protected.zip" }
+        viewModel.onOptionActionExtract(protectedArchive)
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertFalse(state.isExtracting)
+        assertTrue(state.showPasswordPrompt)
+        assertEquals(protectedArchive, state.itemForPasswordExtraction)
+
+        // Submit password
+        viewModel.onConfirmPasswordExtraction("secret123")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val finalState = viewModel.uiState.value
+        assertFalse(finalState.showPasswordPrompt)
+        assertFalse(finalState.isExtracting)
+        assertNotNull(finalState.snackbarMessage)
+        assertTrue(finalState.snackbarMessage!!.contains("Extracted to protected"))
     }
 }
 
@@ -165,6 +208,30 @@ class FakeFileRepository : FileRepository {
                 formattedDate = "Jan 02, 2024",
                 extension = "zip",
                 fileType = FileType.ARCHIVE
+            ),
+            FileItem(
+                id = "/storage/emulated/0/protected.zip",
+                name = "protected.zip",
+                path = "/storage/emulated/0/protected.zip",
+                isFolder = false,
+                sizeInBytes = 2048,
+                formattedSize = "2.0 KB",
+                lastModifiedTimestamp = 2500L,
+                formattedDate = "Jan 02, 2024",
+                extension = "zip",
+                fileType = FileType.ARCHIVE
+            ),
+            FileItem(
+                id = "/storage/emulated/0/document.pdf",
+                name = "document.pdf",
+                path = "/storage/emulated/0/document.pdf",
+                isFolder = false,
+                sizeInBytes = 512,
+                formattedSize = "512 B",
+                lastModifiedTimestamp = 2800L,
+                formattedDate = "Jan 02, 2024",
+                extension = "pdf",
+                fileType = FileType.OTHER
             )
         ),
         "/storage/emulated/0/Documents" to mutableListOf(
@@ -230,4 +297,19 @@ class FakeFileRepository : FileRepository {
     override fun getStorageRootPath(): String = "/storage/emulated/0"
 
     override fun getDownloadsPath(): String = "/storage/emulated/0/Download"
+
+    override suspend fun extractArchive(
+        archivePath: String,
+        destPath: String,
+        password: String?
+    ): Result<Boolean> {
+        if (archivePath.contains("protected") && password.isNullOrEmpty()) {
+            return Result.failure(Exception("Passphrase required for protected archive"))
+        }
+        return Result.success(true)
+    }
+
+    override suspend fun listArchiveContents(archivePath: String): Result<List<String>> {
+        return Result.success(listOf("file1.txt", "file2.jpg"))
+    }
 }
