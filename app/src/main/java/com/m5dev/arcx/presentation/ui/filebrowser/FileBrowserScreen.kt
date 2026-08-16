@@ -46,7 +46,6 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -79,7 +78,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -104,7 +102,6 @@ fun FileBrowserScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Permission Launchers
     val manageStorageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
@@ -127,7 +124,6 @@ fun FileBrowserScreen(
         )
     }
 
-    // Lifecycle observer to check storage permission when app resumes
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -265,6 +261,21 @@ fun FileBrowserScreen(
         )
     }
 
+    // Extraction Progress Dialog
+    if (uiState.isExtracting) {
+        ExtractionProgressDialog(
+            fileName = uiState.extractingFileName ?: "archive"
+        )
+    }
+
+    // Password Prompt Dialog
+    if (uiState.showPasswordPrompt) {
+        PasswordPromptDialog(
+            onDismiss = { viewModel.onDismissPasswordPrompt() },
+            onConfirm = { password -> viewModel.onConfirmPasswordExtraction(password) }
+        )
+    }
+
     // Delete Confirmation Dialog
     uiState.selectedItemForDelete?.let { item ->
         DeleteConfirmationDialog(
@@ -309,6 +320,76 @@ fun FileBrowserScreen(
             onCreate = { name -> viewModel.onCreateArchiveSubmit(name) }
         )
     }
+}
+
+@Composable
+fun ExtractionProgressDialog(fileName: String) {
+    AlertDialog(
+        onDismissRequest = { /* Non-dismissable while extracting */ },
+        title = { Text(text = "Extracting Archive") },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+            ) {
+                CircularProgressIndicator()
+                Text(
+                    text = "Extracting $fileName...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
+                )
+            }
+        },
+        confirmButton = {}
+    )
+}
+
+@Composable
+fun PasswordPromptDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "Password Required") },
+        text = {
+            Column {
+                Text(
+                    text = "This archive is password protected. Enter password to extract:",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (password.isNotEmpty()) {
+                        onConfirm(password)
+                    }
+                }
+            ) {
+                Text("Extract")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)

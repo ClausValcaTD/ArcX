@@ -1,6 +1,7 @@
 package com.m5dev.arcx.data.repository
 
 import android.os.Environment
+import com.m5dev.arcx.data.ndk.ArchiveNative
 import com.m5dev.arcx.domain.model.FileItem
 import com.m5dev.arcx.domain.model.FileType
 import com.m5dev.arcx.domain.repository.FileRepository
@@ -88,6 +89,50 @@ class FileRepositoryImpl @Inject constructor() : FileRepository {
     override fun getDownloadsPath(): String {
         val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         return downloadsDir?.absolutePath ?: "${getStorageRootPath()}/Download"
+    }
+
+    override suspend fun extractArchive(
+        archivePath: String,
+        destPath: String,
+        password: String?
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val archiveFile = File(archivePath)
+            if (!archiveFile.exists()) {
+                return@withContext Result.failure(IllegalArgumentException("Archive file does not exist: $archivePath"))
+            }
+            val destDir = File(destPath)
+            if (!destDir.exists()) {
+                destDir.mkdirs()
+            }
+
+            val success = if (password.isNullOrEmpty()) {
+                ArchiveNative.extractArchive(archivePath, destPath)
+            } else {
+                ArchiveNative.extractArchiveWithPassword(archivePath, destPath, password)
+            }
+
+            if (success) {
+                Result.success(true)
+            } else {
+                Result.failure(IllegalStateException("Failed to extract archive"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun listArchiveContents(archivePath: String): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            val archiveFile = File(archivePath)
+            if (!archiveFile.exists()) {
+                return@withContext Result.failure(IllegalArgumentException("Archive file does not exist: $archivePath"))
+            }
+            val contents = ArchiveNative.listArchiveContents(archivePath)
+            Result.success(contents.toList())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     private fun mapToFileItem(file: File): FileItem {

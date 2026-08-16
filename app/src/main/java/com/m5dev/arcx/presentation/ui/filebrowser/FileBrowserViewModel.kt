@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 @HiltViewModel
@@ -114,10 +115,82 @@ class FileBrowserViewModel @Inject constructor(
         _uiState.update { it.copy(selectedFileForOptions = null) }
     }
 
-    fun onOptionActionExtract(fileItem: FileItem) {
+    fun onOptionActionExtract(fileItem: FileItem, password: String? = null) {
         onDismissFileOptions()
+        val targetDirName = fileItem.name.substringBeforeLast(".")
+        val currentPath = _uiState.value.currentPath
+        val destPath = "$currentPath/$targetDirName"
+
         _uiState.update {
-            it.copy(snackbarMessage = "Extracting ${fileItem.name}...")
+            it.copy(
+                isExtracting = true,
+                extractingFileName = fileItem.name
+            )
+        }
+
+        viewModelScope.launch {
+            val result = fileRepository.extractArchive(
+                archivePath = fileItem.path,
+                destPath = destPath,
+                password = password
+            )
+
+            result.fold(
+                onSuccess = {
+                    _uiState.update { state ->
+                        state.copy(
+                            isExtracting = false,
+                            extractingFileName = null,
+                            showPasswordPrompt = false,
+                            itemForPasswordExtraction = null,
+                            snackbarMessage = "Extracted to $targetDirName"
+                        )
+                    }
+                    loadCurrentDirectory()
+                },
+                onFailure = { error ->
+                    val errMsg = error.localizedMessage ?: "Unknown error"
+                    val isPassRequired = errMsg.contains("passphrase", ignoreCase = true) ||
+                            errMsg.contains("password", ignoreCase = true) ||
+                            errMsg.contains("encrypted", ignoreCase = true)
+
+                    if (isPassRequired && password == null) {
+                        _uiState.update { state ->
+                            state.copy(
+                                isExtracting = false,
+                                extractingFileName = null,
+                                showPasswordPrompt = true,
+                                itemForPasswordExtraction = fileItem
+                            )
+                        }
+                    } else {
+                        _uiState.update { state ->
+                            state.copy(
+                                isExtracting = false,
+                                extractingFileName = null,
+                                showPasswordPrompt = false,
+                                itemForPasswordExtraction = null,
+                                snackbarMessage = "Extraction failed: $errMsg"
+                            )
+                        }
+                    }
+                }
+            )
+        }
+    }
+
+    fun onConfirmPasswordExtraction(password: String) {
+        val fileItem = _uiState.value.itemForPasswordExtraction ?: return
+        _uiState.update { it.copy(showPasswordPrompt = false) }
+        onOptionActionExtract(fileItem, password)
+    }
+
+    fun onDismissPasswordPrompt() {
+        _uiState.update {
+            it.copy(
+                showPasswordPrompt = false,
+                itemForPasswordExtraction = null
+            )
         }
     }
 

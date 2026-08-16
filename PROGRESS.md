@@ -13,12 +13,12 @@
 - [x] File browser UI
 - [x] Storage permissions handling
 - [x] Real file system access and browser
+- [x] NDK integration (libarchive)
+- [x] Archive extraction (ZIP)
 
 ## Next Steps
-- [ ] NDK integration (libarchive)
-- [ ] Archive extraction (ZIP)
 - [ ] Archive creation
-- [ ] Password-protected archives
+- [ ] Password-protected archive creation
 - [ ] Background extraction with notifications
 - [ ] Settings screen
 
@@ -29,4 +29,6 @@
 - Real file system access implemented with `java.io.File` API across `:domain` and `:data` modules
 - File type icon detection with custom badged extension icon for archives
 - Long-press menu supporting Extract, Compress, Delete, Rename, and Details dialogs
-- NDK will be added in next steps
+- NDK integrated with libarchive 3.7.7 via CMake 3.22 for API 24+ across arm64-v8a, armeabi-v7a, and x86_64
+- JNI bridge (`ArchiveNative`) supporting listing archive contents, standard extraction, and password-protected extraction
+- Currently supported formats: ZIP (done), 7Z/RAR/TAR (next)
