@@ -187,6 +187,82 @@ class FileBrowserViewModelTest {
         assertNotNull(finalState.snackbarMessage)
         assertTrue(finalState.snackbarMessage!!.contains("Extraction started in background"))
     }
+
+    @Test
+    fun compressFile_opensCompressionDialog_and_submitsBackgroundJob() = runTest {
+        viewModel.onPermissionStatusUpdated(true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val docItem = viewModel.uiState.value.items.first { it.name == "document.pdf" }
+        viewModel.onOptionActionCompress(docItem)
+
+        val config = viewModel.uiState.value.compressionConfig
+        assertNotNull(config)
+        assertEquals("document", config!!.defaultName)
+        assertEquals(listOf(docItem.path), config.sourcePaths)
+
+        viewModel.onSubmitCompression(
+            config = config.copy(format = "ZIP", compressionLevel = "Maximum", password = "pass", encryptionMethod = "AES-256"),
+            archiveName = "document"
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertNull(state.compressionConfig)
+        assertNotNull(state.snackbarMessage)
+        assertTrue(state.snackbarMessage!!.contains("Compression started in background"))
+    }
+
+    @Test
+    fun compressFile_shortPassword_showsWarningSnackbar() = runTest {
+        viewModel.onPermissionStatusUpdated(true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val docItem = viewModel.uiState.value.items.first { it.name == "document.pdf" }
+        viewModel.onOptionActionCompress(docItem)
+
+        val config = viewModel.uiState.value.compressionConfig!!
+        viewModel.onSubmitCompression(
+            config = config.copy(password = "123"), // < 4 chars
+            archiveName = "short_pass"
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals("Password must be at least 4 characters long", state.snackbarMessage)
+    }
+
+    @Test
+    fun compressFile_existingArchive_triggersOverwritePrompt() = runTest {
+        viewModel.onPermissionStatusUpdated(true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // "archive.zip" already exists in repository
+        val docItem = viewModel.uiState.value.items.first { it.name == "document.pdf" }
+        viewModel.onOptionActionCompress(docItem)
+
+        val config = viewModel.uiState.value.compressionConfig!!
+        viewModel.onSubmitCompression(
+            config = config.copy(format = "ZIP"),
+            archiveName = "archive" // archive.zip exists
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertNull(state.compressionConfig)
+        assertTrue(state.showOverwritePrompt)
+        assertNotNull(state.pendingCompressionConfig)
+
+        // Confirm overwrite
+        viewModel.onConfirmOverwriteCompression()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val finalState = viewModel.uiState.value
+        assertFalse(finalState.showOverwritePrompt)
+        assertNull(finalState.pendingCompressionConfig)
+        assertNotNull(finalState.snackbarMessage)
+        assertTrue(finalState.snackbarMessage!!.contains("Compression started in background"))
+    }
 }
 
 class FakeFileRepository : FileRepository {
@@ -337,5 +413,26 @@ class FakeFileRepository : FileRepository {
             return Result.failure(Exception("Passphrase required for protected archive"))
         }
         return Result.success(listOf("file1.txt", "file2.jpg"))
+    }
+
+    override suspend fun createArchiveWithProgress(
+        sourcePaths: List<String>,
+        destArchivePath: String,
+        format: String,
+        level: String,
+        password: String?,
+        encryptionMethod: String?,
+        onProgress: ((current: Int, total: Int, fileName: String) -> Boolean)?
+    ): Result<Boolean> {
+        onProgress?.invoke(1, 1, "doc.pdf")
+        return Result.success(true)
+    }
+
+    override fun getAvailableSpaceInBytes(path: String): Long {
+        return 100_000_000L // 100 MB
+    }
+
+    override suspend fun calculateTotalSize(paths: List<String>): Long {
+        return 1_000_000L // 1 MB
     }
 }

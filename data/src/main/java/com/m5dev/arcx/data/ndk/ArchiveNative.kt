@@ -4,6 +4,10 @@ fun interface ExtractionProgressListener {
     fun onProgress(current: Int, total: Int, fileName: String): Boolean
 }
 
+fun interface CompressionProgressListener {
+    fun onProgress(current: Int, total: Int, fileName: String): Boolean
+}
+
 object ArchiveNative {
     init {
         System.loadLibrary("arcx_native")
@@ -17,5 +21,15 @@ object ArchiveNative {
         destPath: String,
         password: String?,
         listener: ExtractionProgressListener?
+    ): Boolean
+
+    external fun createArchiveWithProgress(
+        sourcePaths: Array<String>,
+        destArchivePath: String,
+        format: String,
+        level: String,
+        password: String?,
+        encryptionMethod: String?,
+        listener: CompressionProgressListener?
     ): Boolean
 }

@@ -40,6 +40,84 @@ class FileRepositoryImpl @Inject constructor() : FileRepository {
         }
     }
 
+    override suspend fun createArchiveWithProgress(
+        sourcePaths: List<String>,
+        destArchivePath: String,
+        format: String,
+        level: String,
+        password: String?,
+        encryptionMethod: String?,
+        onProgress: ((current: Int, total: Int, fileName: String) -> Boolean)?
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            if (sourcePaths.isEmpty()) {
+                return@withContext Result.failure(IllegalArgumentException("No source files selected for compression"))
+            }
+
+            val destFile = File(destArchivePath)
+            val parentDir = destFile.parentFile
+            if (parentDir != null && !parentDir.exists()) {
+                parentDir.mkdirs()
+            }
+
+            val success = ArchiveNative.createArchiveWithProgress(
+                sourcePaths = sourcePaths.toTypedArray(),
+                destArchivePath = destArchivePath,
+                format = format,
+                level = level,
+                password = password,
+                encryptionMethod = encryptionMethod,
+                listener = if (onProgress != null) {
+                    com.m5dev.arcx.data.ndk.CompressionProgressListener { current, total, fileName ->
+                        onProgress.invoke(current, total, fileName)
+                    }
+                } else null
+            )
+
+            if (success) {
+                Result.success(true)
+            } else {
+                Result.failure(IllegalStateException("Failed to create archive or operation was canceled"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override fun getAvailableSpaceInBytes(path: String): Long {
+        return try {
+            val file = File(path)
+            if (file.exists()) {
+                file.freeSpace
+            } else {
+                file.parentFile?.freeSpace ?: 0L
+            }
+        } catch (e: Exception) {
+            0L
+        }
+    }
+
+    override suspend fun calculateTotalSize(paths: List<String>): Long = withContext(Dispatchers.IO) {
+        var total = 0L
+        for (p in paths) {
+            val file = File(p)
+            if (file.exists()) {
+                total += calculateFileSizeRecursive(file)
+            }
+        }
+        total
+    }
+
+    private fun calculateFileSizeRecursive(file: File): Long {
+        if (!file.isDirectory) return file.length()
+        var size = 0L
+        val children = file.listFiles() ?: return 0L
+        for (child in children) {
+            size += calculateFileSizeRecursive(child)
+        }
+        return size
+    }
+
     override suspend fun deleteFile(path: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val file = File(path)

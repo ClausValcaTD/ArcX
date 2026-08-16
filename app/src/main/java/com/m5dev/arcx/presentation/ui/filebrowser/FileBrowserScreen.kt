@@ -12,6 +12,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,9 +32,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
@@ -43,6 +46,8 @@ import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
@@ -52,8 +57,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,6 +71,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -73,6 +81,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -156,57 +167,84 @@ fun FileBrowserScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = uiState.currentFolderName,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        Text(
-                            text = uiState.currentPath,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                },
-                navigationIcon = {
-                    if (uiState.canNavigateUp) {
-                        IconButton(onClick = { viewModel.onNavigateUp() }) {
+            if (uiState.isSelectionMode) {
+                TopAppBar(
+                    title = {
+                        Text(text = "${uiState.selectedPaths.size} selected")
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { viewModel.clearSelection() }) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back"
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear selection"
                             )
                         }
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.onOpenActiveJobsSheet() }) {
-                        if (uiState.activeJobsCount > 0) {
-                            BadgedBox(
-                                badge = { Badge { Text("${uiState.activeJobsCount}") } }
-                            ) {
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.onCompressSelectedFiles() }) {
+                            Icon(
+                                imageVector = Icons.Outlined.Compress,
+                                contentDescription = "Compress selected"
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                    )
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = uiState.currentFolderName,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                            Text(
+                                text = uiState.currentPath,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        if (uiState.canNavigateUp) {
+                            IconButton(onClick = { viewModel.onNavigateUp() }) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back"
+                                )
+                            }
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.onOpenActiveJobsSheet() }) {
+                            if (uiState.activeJobsCount > 0) {
+                                BadgedBox(
+                                    badge = { Badge { Text("${uiState.activeJobsCount}") } }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.FormatListBulleted,
+                                        contentDescription = "Active Jobs"
+                                    )
+                                }
+                            } else {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.FormatListBulleted,
                                     contentDescription = "Active Jobs"
                                 )
                             }
-                        } else {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.FormatListBulleted,
-                                contentDescription = "Active Jobs"
-                            )
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                    )
                 )
-            )
+            }
         },
         bottomBar = {
             FileBrowserBottomBar(
@@ -215,7 +253,7 @@ fun FileBrowserScreen(
             )
         },
         floatingActionButton = {
-            if (uiState.hasStoragePermission) {
+            if (uiState.hasStoragePermission && !uiState.isSelectionMode) {
                 FloatingActionButton(
                     onClick = { viewModel.onFabClick() },
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -261,10 +299,25 @@ fun FileBrowserScreen(
                             items = uiState.items,
                             key = { it.id }
                         ) { item ->
+                            val isSelected = uiState.selectedPaths.contains(item.path)
                             FileListItem(
                                 fileItem = item,
-                                onClick = { viewModel.onFileClick(item) },
-                                onLongClick = { viewModel.onFileLongClick(item) }
+                                isSelectionMode = uiState.isSelectionMode,
+                                isSelected = isSelected,
+                                onClick = {
+                                    if (uiState.isSelectionMode) {
+                                        viewModel.toggleItemSelection(item)
+                                    } else {
+                                        viewModel.onFileClick(item)
+                                    }
+                                },
+                                onLongClick = {
+                                    if (!uiState.isSelectionMode) {
+                                        viewModel.onFileLongClick(item)
+                                    } else {
+                                        viewModel.toggleItemSelection(item)
+                                    }
+                                }
                             )
                         }
                     }
@@ -358,12 +411,50 @@ fun FileBrowserScreen(
             onCreate = { name -> viewModel.onCreateArchiveSubmit(name) }
         )
     }
+
+    // Comprehensive Compression Dialog
+    uiState.compressionConfig?.let { config ->
+        CompressDialog(
+            initialConfig = config,
+            onDismiss = { viewModel.onDismissCompressionDialog() },
+            onSubmit = { updatedConfig, archiveName ->
+                viewModel.onSubmitCompression(updatedConfig, archiveName)
+            }
+        )
+    }
+
+    // Overwrite Confirmation Dialog
+    if (uiState.showOverwritePrompt) {
+        val pendingConfig = uiState.pendingCompressionConfig
+        val ext = when (pendingConfig?.format?.lowercase()) {
+            "7z" -> ".7z"
+            "tar" -> ".tar"
+            else -> ".zip"
+        }
+        val filename = "${pendingConfig?.defaultName}$ext"
+
+        AlertDialog(
+            onDismissRequest = { viewModel.onDismissOverwritePrompt() },
+            title = { Text("Archive Already Exists") },
+            text = { Text("An archive named \"$filename\" already exists in this directory. Do you want to overwrite it?") },
+            confirmButton = {
+                TextButton(onClick = { viewModel.onConfirmOverwriteCompression() }) {
+                    Text("Overwrite", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.onDismissOverwritePrompt() }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActiveJobsBottomSheet(
-    activeJobs: List<ExtractionJobItem>,
+    activeJobs: List<ArchiveJobItem>,
     onDismiss: () -> Unit,
     onCancelJob: (UUID) -> Unit,
     onOpenFolder: (String) -> Unit
@@ -380,7 +471,7 @@ fun ActiveJobsBottomSheet(
                 .padding(horizontal = 24.dp, vertical = 16.dp)
         ) {
             Text(
-                text = "Active & Recent Extractions",
+                text = "Active & Recent Jobs",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
@@ -404,7 +495,7 @@ fun ActiveJobsBottomSheet(
                         items = activeJobs,
                         key = { it.id }
                     ) { job ->
-                        ExtractionJobListItem(
+                        ArchiveJobListItem(
                             job = job,
                             onCancelJob = { onCancelJob(job.id) },
                             onOpenFolder = { onOpenFolder(job.destPath) }
@@ -419,8 +510,8 @@ fun ActiveJobsBottomSheet(
 }
 
 @Composable
-fun ExtractionJobListItem(
-    job: ExtractionJobItem,
+fun ArchiveJobListItem(
+    job: ArchiveJobItem,
     onCancelJob: () -> Unit,
     onOpenFolder: () -> Unit
 ) {
@@ -458,7 +549,7 @@ fun ExtractionJobListItem(
                             tint = MaterialTheme.colorScheme.error
                         )
                     }
-                } else if (job.status == ExtractionJobStatus.SUCCEEDED && job.destPath.isNotEmpty()) {
+                } else if (job.status == JobStatus.SUCCEEDED && job.destPath.isNotEmpty()) {
                     TextButton(onClick = onOpenFolder) {
                         Text("Open folder")
                     }
@@ -468,7 +559,7 @@ fun ExtractionJobListItem(
             Spacer(modifier = Modifier.height(4.dp))
 
             when (job.status) {
-                ExtractionJobStatus.RUNNING, ExtractionJobStatus.ENQUEUED -> {
+                JobStatus.RUNNING, JobStatus.ENQUEUED -> {
                     LinearProgressIndicator(
                         progress = { if (job.totalFiles > 0) job.percentage / 100f else 0f },
                         modifier = Modifier.fillMaxWidth()
@@ -476,27 +567,27 @@ fun ExtractionJobListItem(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = if (job.totalFiles > 0) {
-                            "${job.currentFile}/${job.totalFiles} files (${job.percentage}%)"
+                            "${if (job.jobType == JobType.COMPRESSION) "Compressing" else "Extracting"} ${job.currentFile}/${job.totalFiles} files (${job.percentage}%)"
                         } else "Starting...",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                ExtractionJobStatus.SUCCEEDED -> {
+                JobStatus.SUCCEEDED -> {
                     Text(
-                        text = "Completed successfully",
+                        text = "${if (job.jobType == JobType.COMPRESSION) "Compression" else "Extraction"} completed successfully",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
-                ExtractionJobStatus.FAILED -> {
+                JobStatus.FAILED -> {
                     Text(
                         text = "Failed: ${job.errorMessage ?: "Unknown error"}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
                 }
-                ExtractionJobStatus.CANCELLED -> {
+                JobStatus.CANCELLED -> {
                     Text(
                         text = "Canceled",
                         style = MaterialTheme.typography.bodySmall,
@@ -582,6 +673,8 @@ fun PasswordPromptDialog(
 @Composable
 fun FileListItem(
     fileItem: FileItem,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -623,10 +716,17 @@ fun FileListItem(
             }
         },
         leadingContent = {
-            FileTypeIcon(
-                fileItem = fileItem,
-                tint = iconTint
-            )
+            if (isSelectionMode) {
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = { onClick() }
+                )
+            } else {
+                FileTypeIcon(
+                    fileItem = fileItem,
+                    tint = iconTint
+                )
+            }
         }
     )
 }
@@ -1054,6 +1154,169 @@ fun ErrorView(
             Text("Retry")
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CompressDialog(
+    initialConfig: CompressionConfig,
+    onDismiss: () -> Unit,
+    onSubmit: (CompressionConfig, String) -> Unit
+) {
+    var archiveName by remember { mutableStateOf(initialConfig.defaultName) }
+    var format by remember { mutableStateOf(initialConfig.format) } // ZIP, 7Z, TAR
+    var level by remember { mutableStateOf(initialConfig.compressionLevel) } // Store, Fast, Normal, Maximum
+    var password by remember { mutableStateOf(initialConfig.password) }
+    var encryptionMethod by remember { mutableStateOf(initialConfig.encryptionMethod) } // ZipCrypto, AES-256
+    var passwordVisible by remember { mutableStateOf(false) }
+
+    val formats = listOf("ZIP", "7Z", "TAR")
+    val levels = listOf("Store", "Fast", "Normal", "Maximum")
+    val encryptionMethods = listOf("ZipCrypto", "AES-256")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "Compress Files") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Archive Name
+                OutlinedTextField(
+                    value = archiveName,
+                    onValueChange = { archiveName = it },
+                    label = { Text("Archive Name") },
+                    singleLine = true,
+                    suffix = { Text(".${format.lowercase()}") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Archive Format Selection
+                Column {
+                    Text(
+                        text = "Format",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        formats.forEach { fmt ->
+                            FilterChip(
+                                selected = format == fmt,
+                                onClick = { format = fmt },
+                                label = { Text(fmt) },
+                                leadingIcon = if (format == fmt) {
+                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                } else null
+                            )
+                        }
+                    }
+                }
+
+                // Compression Level Selection
+                Column {
+                    Text(
+                        text = "Compression Level",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        levels.forEach { lvl ->
+                            FilterChip(
+                                selected = level == lvl,
+                                onClick = { level = lvl },
+                                label = { Text(lvl, fontSize = 12.sp) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+
+                // Password Input (Optional)
+                if (format == "ZIP" || format == "7Z") {
+                    Column {
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = { Text("Password (optional)") },
+                            singleLine = true,
+                            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            trailingIcon = {
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    Icon(
+                                        imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (passwordVisible) "Hide password" else "Show password"
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Encryption Method for ZIP
+                        if (password.isNotEmpty() && format == "ZIP") {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Encryption Method",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                encryptionMethods.forEach { method ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.clickable { encryptionMethod = method }
+                                    ) {
+                                        RadioButton(
+                                            selected = encryptionMethod == method,
+                                            onClick = { encryptionMethod = method }
+                                        )
+                                        Text(
+                                            text = method,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (archiveName.isNotBlank()) {
+                        val updatedConfig = initialConfig.copy(
+                            format = format,
+                            compressionLevel = level,
+                            password = password,
+                            encryptionMethod = encryptionMethod
+                        )
+                        onSubmit(updatedConfig, archiveName.trim())
+                    }
+                }
+            ) {
+                Text("Compress")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

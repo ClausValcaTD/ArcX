@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <limits.h>
+#include <dirent.h>
 
 #define LOG_TAG "ArcX_Native"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -297,6 +298,279 @@ Java_com_m5dev_arcx_data_ndk_ArchiveNative_extractArchive(
     env->ReleaseStringUTFChars(dest_path_jstr, dest_path);
 
     return result;
+}
+
+struct FileToCompress {
+    std::string full_path;
+    std::string relative_path;
+    bool is_directory;
+};
+
+static void collect_files_recursive(
+        const std::string &base_src_dir,
+        const std::string &current_path,
+        const std::string &rel_prefix,
+        std::vector<FileToCompress> &files) {
+
+    struct stat st;
+    if (stat(current_path.c_str(), &st) != 0) {
+        return;
+    }
+
+    if (S_ISDIR(st.st_mode)) {
+        DIR *dir = opendir(current_path.c_str());
+        if (!dir) return;
+
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != nullptr) {
+            std::string name = entry->d_name;
+            if (name == "." || name == "..") continue;
+
+            std::string child_full = current_path + "/" + name;
+            std::string child_rel = rel_prefix.empty() ? name : rel_prefix + "/" + name;
+
+            struct stat child_st;
+            if (stat(child_full.c_str(), &child_st) == 0) {
+                if (S_ISDIR(child_st.st_mode)) {
+                    files.push_back({child_full, child_rel + "/", true});
+                    collect_files_recursive(base_src_dir, child_full, child_rel, files);
+                } else {
+                    files.push_back({child_full, child_rel, false});
+                }
+            }
+        }
+        closedir(dir);
+    } else {
+        files.push_back({current_path, rel_prefix, false});
+    }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_m5dev_arcx_data_ndk_ArchiveNative_createArchiveWithProgress(
+        JNIEnv *env,
+        jobject thiz,
+        jobjectArray source_paths_jarr,
+        jstring dest_archive_path_jstr,
+        jstring format_jstr,
+        jstring level_jstr,
+        jstring password_jstr,
+        jstring encryption_method_jstr,
+        jobject listener) {
+
+    if (source_paths_jarr == nullptr || dest_archive_path_jstr == nullptr) {
+        throwIOException(env, "Source paths or destination path is null");
+        return JNI_FALSE;
+    }
+
+    const char *dest_archive_path = env->GetStringUTFChars(dest_archive_path_jstr, nullptr);
+    const char *format_str = format_jstr ? env->GetStringUTFChars(format_jstr, nullptr) : "zip";
+    const char *level_str = level_jstr ? env->GetStringUTFChars(level_jstr, nullptr) : "Normal";
+    const char *password = password_jstr ? env->GetStringUTFChars(password_jstr, nullptr) : nullptr;
+    const char *encryption_method = encryption_method_jstr ? env->GetStringUTFChars(encryption_method_jstr, nullptr) : nullptr;
+
+    jsize count = env->GetArrayLength(source_paths_jarr);
+    std::vector<FileToCompress> files_to_compress;
+
+    for (jsize i = 0; i < count; ++i) {
+        jstring src_jstr = (jstring) env->GetObjectArrayElement(source_paths_jarr, i);
+        if (src_jstr == nullptr) continue;
+        const char *src_path = env->GetStringUTFChars(src_jstr, nullptr);
+
+        struct stat st = {};
+        if (stat(src_path, &st) == 0) {
+            std::string full_path(src_path);
+            std::string base_name = full_path;
+            size_t pos = base_name.find_last_of("/\\");
+            if (pos != std::string::npos) {
+                base_name = base_name.substr(pos + 1);
+            }
+
+            if (S_ISDIR(st.st_mode)) {
+                files_to_compress.push_back({full_path, base_name + "/", true});
+                collect_files_recursive(full_path, full_path, base_name, files_to_compress);
+            } else {
+                files_to_compress.push_back({full_path, base_name, false});
+            }
+        }
+
+        env->ReleaseStringUTFChars(src_jstr, src_path);
+        env->DeleteLocalRef(src_jstr);
+    }
+
+    struct archive *a = archive_write_new();
+    if (!a) {
+        env->ReleaseStringUTFChars(dest_archive_path_jstr, dest_archive_path);
+        if (format_jstr) env->ReleaseStringUTFChars(format_jstr, format_str);
+        if (level_jstr) env->ReleaseStringUTFChars(level_jstr, level_str);
+        if (password_jstr && password) env->ReleaseStringUTFChars(password_jstr, password);
+        if (encryption_method_jstr && encryption_method) env->ReleaseStringUTFChars(encryption_method_jstr, encryption_method);
+        throwIOException(env, "Failed to create archive writer");
+        return JNI_FALSE;
+    }
+
+    std::string fmt_lower(format_str);
+    for (auto &c : fmt_lower) c = tolower(c);
+
+    if (fmt_lower == "7z") {
+        archive_write_set_format_7zip(a);
+    } else if (fmt_lower == "tar") {
+        archive_write_set_format_pax_restricted(a); // Standard tar format
+    } else {
+        archive_write_set_format_zip(a);
+    }
+
+    // Handle compression level option
+    std::string lvl_str(level_str);
+    std::string comp_level_opt = "complevel=6"; // Default normal
+    if (lvl_str == "Store") {
+        comp_level_opt = "complevel=0";
+    } else if (lvl_str == "Fast") {
+        comp_level_opt = "complevel=1";
+    } else if (lvl_str == "Maximum") {
+        comp_level_opt = "complevel=9";
+    }
+    archive_write_set_filter_option(a, nullptr, "compression-level", comp_level_opt.c_str());
+
+    // Password & Encryption setting for ZIP/7Z
+    if (password != nullptr && strlen(password) > 0) {
+        archive_write_set_passphrase(a, password);
+
+        if (fmt_lower == "zip") {
+            if (encryption_method != nullptr && std::string(encryption_method) == "AES-256") {
+                archive_write_set_options(a, "zip:encryption=aes256");
+            } else {
+                archive_write_set_options(a, "zip:encryption=zipcrypt");
+            }
+        }
+    }
+
+    int r = archive_write_open_filename(a, dest_archive_path);
+    if (r != ARCHIVE_OK) {
+        std::string err = "Failed to open output archive: ";
+        err += archive_error_string(a) ? archive_error_string(a) : "Unknown error";
+        archive_write_free(a);
+
+        env->ReleaseStringUTFChars(dest_archive_path_jstr, dest_archive_path);
+        if (format_jstr) env->ReleaseStringUTFChars(format_jstr, format_str);
+        if (level_jstr) env->ReleaseStringUTFChars(level_jstr, level_str);
+        if (password_jstr && password) env->ReleaseStringUTFChars(password_jstr, password);
+        if (encryption_method_jstr && encryption_method) env->ReleaseStringUTFChars(encryption_method_jstr, encryption_method);
+
+        throwIOException(env, err.c_str());
+        return JNI_FALSE;
+    }
+
+    jmethodID onProgressMethod = nullptr;
+    if (listener != nullptr) {
+        jclass listenerClass = env->GetObjectClass(listener);
+        if (listenerClass != nullptr) {
+            onProgressMethod = env->GetMethodID(listenerClass, "onProgress", "(IILjava/lang/String;)Z");
+        }
+    }
+
+    int total_files = (int) files_to_compress.size();
+    if (total_files <= 0) total_files = 1;
+
+    bool success = true;
+    std::string error_msg = "";
+
+    for (int i = 0; i < (int) files_to_compress.size(); ++i) {
+        const auto &file_item = files_to_compress[i];
+
+        if (listener != nullptr && onProgressMethod != nullptr) {
+            jstring nameJStr = env->NewStringUTF(file_item.relative_path.c_str());
+            jboolean shouldContinue = env->CallBooleanMethod(listener, onProgressMethod, (jint)(i + 1), (jint)total_files, nameJStr);
+            env->DeleteLocalRef(nameJStr);
+
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                shouldContinue = JNI_FALSE;
+            }
+
+            if (!shouldContinue) {
+                error_msg = "Compression canceled";
+                success = false;
+                break;
+            }
+        }
+
+        struct archive_entry *entry = archive_entry_new();
+        archive_entry_set_pathname(entry, file_item.relative_path.c_str());
+
+        struct stat st = {};
+        if (stat(file_item.full_path.c_str(), &st) == 0) {
+            archive_entry_copy_stat(entry, &st);
+        } else {
+            archive_entry_set_filetype(entry, file_item.is_directory ? AE_IFDIR : AE_IFREG);
+            archive_entry_set_perm(entry, 0644);
+        }
+
+        if (file_item.is_directory) {
+            archive_entry_set_filetype(entry, AE_IFDIR);
+            archive_entry_set_size(entry, 0);
+            r = archive_write_header(a, entry);
+            archive_entry_free(entry);
+            if (r < ARCHIVE_OK) {
+                error_msg = archive_error_string(a) ? archive_error_string(a) : "Write directory header failed";
+                if (r < ARCHIVE_WARN) {
+                    success = false;
+                    break;
+                }
+            }
+            continue;
+        }
+
+        archive_entry_set_filetype(entry, AE_IFREG);
+        archive_entry_set_size(entry, st.st_size);
+
+        r = archive_write_header(a, entry);
+        if (r < ARCHIVE_OK) {
+            error_msg = archive_error_string(a) ? archive_error_string(a) : "Write file header failed";
+            archive_entry_free(entry);
+            if (r < ARCHIVE_WARN) {
+                success = false;
+                break;
+            }
+            continue;
+        }
+
+        FILE *f = fopen(file_item.full_path.c_str(), "rb");
+        if (f != nullptr) {
+            char buff[8192];
+            size_t bytes_read = fread(buff, 1, sizeof(buff), f);
+            while (bytes_read > 0) {
+                ssize_t written = archive_write_data(a, buff, bytes_read);
+                if (written < 0) {
+                    error_msg = archive_error_string(a) ? archive_error_string(a) : "Write data error";
+                    success = false;
+                    break;
+                }
+                bytes_read = fread(buff, 1, sizeof(buff), f);
+            }
+            fclose(f);
+        }
+
+        archive_entry_free(entry);
+        if (!success) break;
+    }
+
+    archive_write_close(a);
+    archive_write_free(a);
+
+    env->ReleaseStringUTFChars(dest_archive_path_jstr, dest_archive_path);
+    if (format_jstr) env->ReleaseStringUTFChars(format_jstr, format_str);
+    if (level_jstr) env->ReleaseStringUTFChars(level_jstr, level_str);
+    if (password_jstr && password) env->ReleaseStringUTFChars(password_jstr, password);
+    if (encryption_method_jstr && encryption_method) env->ReleaseStringUTFChars(encryption_method_jstr, encryption_method);
+
+    if (!success) {
+        // Remove partially created archive if failed/canceled
+        unlink(dest_archive_path);
+        throwIOException(env, error_msg.empty() ? "Archive creation failed" : error_msg.c_str());
+        return JNI_FALSE;
+    }
+
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
