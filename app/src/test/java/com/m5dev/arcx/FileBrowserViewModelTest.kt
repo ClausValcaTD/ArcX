@@ -1,5 +1,7 @@
 package com.m5dev.arcx
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import com.m5dev.arcx.domain.model.FileItem
 import com.m5dev.arcx.domain.model.FileType
 import com.m5dev.arcx.domain.repository.FileRepository
@@ -19,19 +21,26 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 @OptIn(ExperimentalCoroutinesApi::class)
 class FileBrowserViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private lateinit var fakeRepository: FakeFileRepository
     private lateinit var viewModel: FileBrowserViewModel
+    private lateinit var context: Context
 
     @Before
     fun setup() {
         Dispatchers.setMain(testDispatcher)
+        context = ApplicationProvider.getApplicationContext()
         fakeRepository = FakeFileRepository()
-        viewModel = FileBrowserViewModel(fakeRepository)
+        viewModel = FileBrowserViewModel(fakeRepository, context)
     }
 
     @After
@@ -150,7 +159,7 @@ class FileBrowserViewModelTest {
         assertFalse(state.isExtracting)
         assertNull(state.extractingFileName)
         assertNotNull(state.snackbarMessage)
-        assertTrue(state.snackbarMessage!!.contains("Extracted to archive"))
+        assertTrue(state.snackbarMessage!!.contains("Extraction started in background"))
     }
 
     @Test
@@ -176,7 +185,7 @@ class FileBrowserViewModelTest {
         assertFalse(finalState.showPasswordPrompt)
         assertFalse(finalState.isExtracting)
         assertNotNull(finalState.snackbarMessage)
-        assertTrue(finalState.snackbarMessage!!.contains("Extracted to protected"))
+        assertTrue(finalState.snackbarMessage!!.contains("Extraction started in background"))
     }
 }
 
@@ -309,7 +318,24 @@ class FakeFileRepository : FileRepository {
         return Result.success(true)
     }
 
+    override suspend fun extractArchiveWithProgress(
+        archivePath: String,
+        destPath: String,
+        password: String?,
+        onProgress: ((current: Int, total: Int, fileName: String) -> Boolean)?
+    ): Result<Boolean> {
+        if (archivePath.contains("protected") && password.isNullOrEmpty()) {
+            return Result.failure(Exception("Passphrase required for protected archive"))
+        }
+        onProgress?.invoke(1, 2, "file1.txt")
+        onProgress?.invoke(2, 2, "file2.jpg")
+        return Result.success(true)
+    }
+
     override suspend fun listArchiveContents(archivePath: String): Result<List<String>> {
+        if (archivePath.contains("protected")) {
+            return Result.failure(Exception("Passphrase required for protected archive"))
+        }
         return Result.success(listOf("file1.txt", "file2.jpg"))
     }
 }

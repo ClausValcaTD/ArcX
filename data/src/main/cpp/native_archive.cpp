@@ -53,6 +53,32 @@ static bool is_safe_path(const std::string& base_dir, const std::string& target_
     return true;
 }
 
+static int count_archive_entries(const char *archive_path, const char *password) {
+    struct archive *a = archive_read_new();
+    archive_read_support_filter_all(a);
+    archive_read_support_format_all(a);
+
+    if (password != nullptr && strlen(password) > 0) {
+        archive_read_add_passphrase(a, password);
+    }
+
+    if (archive_read_open_filename(a, archive_path, 10240) != ARCHIVE_OK) {
+        archive_read_free(a);
+        return 0;
+    }
+
+    int count = 0;
+    struct archive_entry *entry;
+    while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+        count++;
+        archive_read_data_skip(a);
+    }
+
+    archive_read_close(a);
+    archive_read_free(a);
+    return count;
+}
+
 extern "C" JNIEXPORT jobjectArray JNICALL
 Java_com_m5dev_arcx_data_ndk_ArchiveNative_listArchiveContents(
         JNIEnv *env,
@@ -118,7 +144,20 @@ static jboolean perform_extraction(
         JNIEnv *env,
         const char *archive_path,
         const char *dest_path,
-        const char *password) {
+        const char *password,
+        jobject listener) {
+
+    int total_entries = 0;
+    jmethodID onProgressMethod = nullptr;
+    if (listener != nullptr) {
+        total_entries = count_archive_entries(archive_path, password);
+        if (total_entries <= 0) total_entries = 1;
+
+        jclass listenerClass = env->GetObjectClass(listener);
+        if (listenerClass != nullptr) {
+            onProgressMethod = env->GetMethodID(listenerClass, "onProgress", "(IILjava/lang/String;)Z");
+        }
+    }
 
     struct archive *a = archive_read_new();
     struct archive *ext = archive_write_disk_new();
@@ -152,6 +191,7 @@ static jboolean perform_extraction(
 
     bool success = true;
     std::string error_msg = "";
+    int current_index = 0;
 
     while (true) {
         r = archive_read_next_header(a, &entry);
@@ -166,6 +206,24 @@ static jboolean perform_extraction(
 
         const char *current_entry = archive_entry_pathname(entry);
         if (current_entry == nullptr) continue;
+
+        current_index++;
+        if (listener != nullptr && onProgressMethod != nullptr) {
+            jstring nameJStr = env->NewStringUTF(current_entry);
+            jboolean shouldContinue = env->CallBooleanMethod(listener, onProgressMethod, (jint)current_index, (jint)total_entries, nameJStr);
+            env->DeleteLocalRef(nameJStr);
+
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                shouldContinue = JNI_FALSE;
+            }
+
+            if (!shouldContinue) {
+                error_msg = "Extraction canceled";
+                success = false;
+                break;
+            }
+        }
 
         std::string full_dest_path = base_dest + current_entry;
 
@@ -233,7 +291,7 @@ Java_com_m5dev_arcx_data_ndk_ArchiveNative_extractArchive(
     const char *archive_path = env->GetStringUTFChars(archive_path_jstr, nullptr);
     const char *dest_path = env->GetStringUTFChars(dest_path_jstr, nullptr);
 
-    jboolean result = perform_extraction(env, archive_path, dest_path, nullptr);
+    jboolean result = perform_extraction(env, archive_path, dest_path, nullptr, nullptr);
 
     env->ReleaseStringUTFChars(archive_path_jstr, archive_path);
     env->ReleaseStringUTFChars(dest_path_jstr, dest_path);
@@ -258,7 +316,36 @@ Java_com_m5dev_arcx_data_ndk_ArchiveNative_extractArchiveWithPassword(
     const char *dest_path = env->GetStringUTFChars(dest_path_jstr, nullptr);
     const char *password = password_jstr ? env->GetStringUTFChars(password_jstr, nullptr) : nullptr;
 
-    jboolean result = perform_extraction(env, archive_path, dest_path, password);
+    jboolean result = perform_extraction(env, archive_path, dest_path, password, nullptr);
+
+    env->ReleaseStringUTFChars(archive_path_jstr, archive_path);
+    env->ReleaseStringUTFChars(dest_path_jstr, dest_path);
+    if (password_jstr && password) {
+        env->ReleaseStringUTFChars(password_jstr, password);
+    }
+
+    return result;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_m5dev_arcx_data_ndk_ArchiveNative_extractArchiveWithProgress(
+        JNIEnv *env,
+        jobject thiz,
+        jstring archive_path_jstr,
+        jstring dest_path_jstr,
+        jstring password_jstr,
+        jobject listener) {
+
+    if (archive_path_jstr == nullptr || dest_path_jstr == nullptr) {
+        throwIOException(env, "Archive path or destination path is null");
+        return JNI_FALSE;
+    }
+
+    const char *archive_path = env->GetStringUTFChars(archive_path_jstr, nullptr);
+    const char *dest_path = env->GetStringUTFChars(dest_path_jstr, nullptr);
+    const char *password = password_jstr ? env->GetStringUTFChars(password_jstr, nullptr) : nullptr;
+
+    jboolean result = perform_extraction(env, archive_path, dest_path, password, listener);
 
     env->ReleaseStringUTFChars(archive_path_jstr, archive_path);
     env->ReleaseStringUTFChars(dest_path_jstr, dest_path);

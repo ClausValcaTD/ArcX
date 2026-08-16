@@ -122,6 +122,43 @@ class FileRepositoryImpl @Inject constructor() : FileRepository {
         }
     }
 
+    override suspend fun extractArchiveWithProgress(
+        archivePath: String,
+        destPath: String,
+        password: String?,
+        onProgress: ((current: Int, total: Int, fileName: String) -> Boolean)?
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val archiveFile = File(archivePath)
+            if (!archiveFile.exists()) {
+                return@withContext Result.failure(IllegalArgumentException("Archive file does not exist: $archivePath"))
+            }
+            val destDir = File(destPath)
+            if (!destDir.exists()) {
+                destDir.mkdirs()
+            }
+
+            val success = ArchiveNative.extractArchiveWithProgress(
+                archivePath = archivePath,
+                destPath = destPath,
+                password = password,
+                listener = if (onProgress != null) {
+                    com.m5dev.arcx.data.ndk.ExtractionProgressListener { current, total, fileName ->
+                        onProgress.invoke(current, total, fileName)
+                    }
+                } else null
+            )
+
+            if (success) {
+                Result.success(true)
+            } else {
+                Result.failure(IllegalStateException("Failed to extract archive or operation was canceled"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun listArchiveContents(archivePath: String): Result<List<String>> = withContext(Dispatchers.IO) {
         try {
             val archiveFile = File(archivePath)

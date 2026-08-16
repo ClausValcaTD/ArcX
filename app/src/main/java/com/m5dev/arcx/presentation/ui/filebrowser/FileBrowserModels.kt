@@ -1,11 +1,36 @@
 package com.m5dev.arcx.presentation.ui.filebrowser
 
 import com.m5dev.arcx.domain.model.FileItem
+import java.util.UUID
 
 enum class StorageLocation(val displayName: String) {
     INTERNAL_STORAGE("Internal Storage"),
     SD_CARD("SD Card"),
     DOWNLOADS("Downloads")
+}
+
+enum class ExtractionJobStatus {
+    ENQUEUED,
+    RUNNING,
+    SUCCEEDED,
+    FAILED,
+    CANCELLED
+}
+
+data class ExtractionJobItem(
+    val id: UUID,
+    val archiveName: String,
+    val archivePath: String,
+    val destPath: String,
+    val status: ExtractionJobStatus,
+    val currentFile: Int = 0,
+    val totalFiles: Int = 0,
+    val percentage: Int = 0,
+    val currentFileName: String = "",
+    val errorMessage: String? = null
+) {
+    val isActive: Boolean
+        get() = status == ExtractionJobStatus.RUNNING || status == ExtractionJobStatus.ENQUEUED
 }
 
 data class FileBrowserUiState(
@@ -25,6 +50,8 @@ data class FileBrowserUiState(
     val selectedItemForDelete: FileItem? = null,
     val selectedItemForDetails: FileItem? = null,
     val showCreateArchiveDialog: Boolean = false,
+    val showActiveJobsSheet: Boolean = false,
+    val activeJobs: List<ExtractionJobItem> = emptyList(),
     val snackbarMessage: String? = null,
     val errorMessage: String? = null
 ) {
@@ -36,4 +63,7 @@ data class FileBrowserUiState(
 
     val canNavigateUp: Boolean
         get() = pathStack.size > 1
+
+    val activeJobsCount: Int
+        get() = activeJobs.count { it.isActive }
 }
