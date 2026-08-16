@@ -6,6 +6,14 @@
 - **Target SDK:** 35
 - **Architecture:** MVVM + Clean Architecture
 
+## Beta Feedback Fixes & Improvements
+- [x] **Extract Options Dialog**: Replaced simple Extract action with 3 choices:
+  - "Extract Here" (extracts to current directory)
+  - "Extract to [archive_name]/" (creates dedicated folder)
+  - "Advanced..." (custom destination path picker, overwrite modes Ask/Skip/Replace, password prompt, and selective entry extraction checkbox list)
+- [x] **7Z Creation Fix**: Enabled LZMA in libarchive CMake build (`ENABLE_LZMA ON`), configured LZMA2 compression options in NDK (`native_archive.cpp`), and added `create7zArchive()` method in JNI bridge.
+- [x] **UI Performance & Caching**: Added Room Database (`file_metadata` table) for file metadata caching, Compose shimmer loading effect for directory rendering, and LazyColumn lazy loading/pagination.
+
 ## Completed Steps
 - [x] Project structure setup
 - [x] Gradle configuration

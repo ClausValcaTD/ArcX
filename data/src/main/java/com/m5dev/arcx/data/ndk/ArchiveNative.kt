@@ -32,4 +32,12 @@ object ArchiveNative {
         encryptionMethod: String?,
         listener: CompressionProgressListener?
     ): Boolean
+
+    external fun create7zArchive(
+        sourcePaths: Array<String>,
+        destArchivePath: String,
+        level: String,
+        password: String?,
+        listener: CompressionProgressListener?
+    ): Boolean
 }

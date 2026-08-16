@@ -59,6 +59,7 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -85,10 +86,12 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -300,11 +303,16 @@ fun FileBrowserScreen(
                     EmptyFolderView()
                 }
                 else -> {
+                    var displayedCount by remember(uiState.items) { mutableIntStateOf(50.coerceAtMost(uiState.items.size)) }
+                    val visibleItems = remember(uiState.items, displayedCount) {
+                        uiState.items.take(displayedCount)
+                    }
+
                     LazyColumn(
                         modifier = Modifier.fillMaxSize()
                     ) {
                         items(
-                            items = uiState.items,
+                            items = visibleItems,
                             key = { it.id }
                         ) { item ->
                             val isSelected = uiState.selectedPaths.contains(item.path)
@@ -328,6 +336,22 @@ fun FileBrowserScreen(
                                 }
                             )
                         }
+
+                        if (displayedCount < uiState.items.size) {
+                            item {
+                                LaunchedEffect(displayedCount) {
+                                    displayedCount = (displayedCount + 50).coerceAtMost(uiState.items.size)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -344,6 +368,26 @@ fun FileBrowserScreen(
             onDelete = { viewModel.onOptionActionDelete(fileItem) },
             onRename = { viewModel.onOptionActionRename(fileItem) },
             onDetails = { viewModel.onOptionActionDetails(fileItem) }
+        )
+    }
+
+    // Extract Options Dialog (3 Options)
+    if (uiState.showExtractOptionsDialog && uiState.extractOptionsFileItem != null) {
+        ExtractOptionsDialog(
+            archiveName = uiState.extractOptionsFileItem!!.name,
+            onDismiss = { viewModel.onDismissExtractOptionsDialog() },
+            onExtractHere = { viewModel.onExtractHere() },
+            onExtractToFolder = { viewModel.onExtractToFolder() },
+            onAdvanced = { viewModel.onOpenAdvancedExtract() }
+        )
+    }
+
+    // Advanced Extract Dialog
+    if (uiState.showAdvancedExtractDialog && uiState.advancedExtractConfig != null) {
+        AdvancedExtractDialog(
+            config = uiState.advancedExtractConfig!!,
+            onDismiss = { viewModel.onDismissAdvancedExtractDialog() },
+            onSubmit = { updatedConfig -> viewModel.onSubmitAdvancedExtract(updatedConfig) }
         )
     }
 
@@ -605,6 +649,233 @@ fun ArchiveJobListItem(
             }
         }
     }
+}
+
+@Composable
+fun ExtractOptionsDialog(
+    archiveName: String,
+    onDismiss: () -> Unit,
+    onExtractHere: () -> Unit,
+    onExtractToFolder: () -> Unit,
+    onAdvanced: () -> Unit
+) {
+    val folderName = archiveName.substringBeforeLast(".")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "Extract Options") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Choose how to extract \"$archiveName\":",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Button(
+                    onClick = onExtractHere,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Extract Here")
+                }
+
+                Button(
+                    onClick = onExtractToFolder,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Extract to $folderName/")
+                }
+
+                OutlinedButton(
+                    onClick = onAdvanced,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Advanced...")
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AdvancedExtractDialog(
+    config: AdvancedExtractConfig,
+    onDismiss: () -> Unit,
+    onSubmit: (AdvancedExtractConfig) -> Unit
+) {
+    var destPath by remember { mutableStateOf(config.destPath) }
+    var overwriteMode by remember { mutableStateOf(config.overwriteMode) }
+    var password by remember { mutableStateOf(config.password) }
+    var passwordVisible by remember { mutableStateOf(false) }
+    var selectedFiles by remember { mutableStateOf(config.selectedFiles) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "Advanced Extraction") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Destination Path
+                OutlinedTextField(
+                    value = destPath,
+                    onValueChange = { destPath = it },
+                    label = { Text("Destination Path") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Overwrite Options
+                Column {
+                    Text(
+                        text = "Overwrite Options",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OverwriteMode.entries.forEach { mode ->
+                            FilterChip(
+                                selected = overwriteMode == mode,
+                                onClick = { overwriteMode = mode },
+                                label = { Text(mode.displayName) },
+                                leadingIcon = if (overwriteMode == mode) {
+                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                } else null
+                            )
+                        }
+                    }
+                }
+
+                // Password Input
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text(if (config.isEncrypted) "Password (Required)" else "Password (Optional)") },
+                    singleLine = true,
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = if (passwordVisible) "Hide password" else "Show password"
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Extract Selected Files List
+                Text(
+                    text = "Select Files to Extract",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                if (config.isLoadingContents) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else if (config.archiveContents.isEmpty()) {
+                    Text(
+                        text = if (config.isEncrypted) "Enter password to view contents" else "No files found in archive",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(4.dp)
+                        ) {
+                            items(
+                                items = config.archiveContents,
+                                key = { it }
+                            ) { file ->
+                                val isChecked = selectedFiles.contains(file)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            selectedFiles = if (isChecked) {
+                                                selectedFiles - file
+                                            } else {
+                                                selectedFiles + file
+                                            }
+                                        }
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = isChecked,
+                                        onCheckedChange = { checked ->
+                                            selectedFiles = if (checked == true) {
+                                                selectedFiles + file
+                                            } else {
+                                                selectedFiles - file
+                                            }
+                                        }
+                                    )
+                                    Text(
+                                        text = file,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val updated = config.copy(
+                        destPath = destPath,
+                        overwriteMode = overwriteMode,
+                        password = password,
+                        selectedFiles = selectedFiles
+                    )
+                    onSubmit(updated)
+                }
+            ) {
+                Text("Extract")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
@@ -1125,11 +1396,60 @@ fun PermissionDeniedView(
 
 @Composable
 fun LoadingView() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        CircularProgressIndicator()
+        repeat(8) {
+            ShimmerFileListItem()
+        }
+    }
+}
+
+@Composable
+fun ShimmerFileListItem() {
+    val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "shimmer")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 0.7f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(durationMillis = 800, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "shimmerAlpha"
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            modifier = Modifier.size(36.dp),
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+        ) {}
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.6f)
+                    .height(16.dp),
+                shape = RoundedCornerShape(4.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+            ) {}
+            Spacer(modifier = Modifier.height(6.dp))
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.35f)
+                    .height(12.dp),
+                shape = RoundedCornerShape(4.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+            ) {}
+        }
     }
 }
 

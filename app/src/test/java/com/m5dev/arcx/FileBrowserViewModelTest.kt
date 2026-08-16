@@ -161,9 +161,14 @@ class FileBrowserViewModelTest {
         val archiveItem = viewModel.uiState.value.items.first { it.name == "archive.zip" }
         viewModel.onOptionActionExtract(archiveItem)
 
+        assertTrue(viewModel.uiState.value.showExtractOptionsDialog)
+        assertEquals(archiveItem, viewModel.uiState.value.extractOptionsFileItem)
+
+        viewModel.onExtractHere()
         testDispatcher.scheduler.advanceUntilIdle()
 
         val state = viewModel.uiState.value
+        assertFalse(state.showExtractOptionsDialog)
         assertFalse(state.isExtracting)
         assertNull(state.extractingFileName)
         assertNotNull(state.snackbarMessage)
@@ -177,6 +182,9 @@ class FileBrowserViewModelTest {
 
         val protectedArchive = viewModel.uiState.value.items.first { it.name == "protected.zip" }
         viewModel.onOptionActionExtract(protectedArchive)
+
+        assertTrue(viewModel.uiState.value.showExtractOptionsDialog)
+        viewModel.onExtractHere()
 
         testDispatcher.scheduler.advanceUntilIdle()
 

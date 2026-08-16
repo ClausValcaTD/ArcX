@@ -413,6 +413,7 @@ Java_com_m5dev_arcx_data_ndk_ArchiveNative_createArchiveWithProgress(
 
     if (fmt_lower == "7z") {
         archive_write_set_format_7zip(a);
+        archive_write_set_format_option(a, "7zip", "compression", "lzma2");
     } else if (fmt_lower == "tar") {
         archive_write_set_format_pax_restricted(a); // Standard tar format
     } else {
@@ -571,6 +572,31 @@ Java_com_m5dev_arcx_data_ndk_ArchiveNative_createArchiveWithProgress(
     }
 
     return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_m5dev_arcx_data_ndk_ArchiveNative_create7zArchive(
+        JNIEnv *env,
+        jobject thiz,
+        jobjectArray source_paths_jarr,
+        jstring dest_archive_path_jstr,
+        jstring level_jstr,
+        jstring password_jstr,
+        jobject listener) {
+
+    jstring format_7z = env->NewStringUTF("7z");
+    jboolean res = Java_com_m5dev_arcx_data_ndk_ArchiveNative_createArchiveWithProgress(
+            env,
+            thiz,
+            source_paths_jarr,
+            dest_archive_path_jstr,
+            format_7z,
+            level_jstr,
+            password_jstr,
+            nullptr,
+            listener);
+    env->DeleteLocalRef(format_7z);
+    return res;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

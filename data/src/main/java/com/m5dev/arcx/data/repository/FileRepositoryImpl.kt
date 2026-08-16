@@ -1,6 +1,8 @@
 package com.m5dev.arcx.data.repository
 
 import android.os.Environment
+import com.m5dev.arcx.data.local.db.FileMetadataDao
+import com.m5dev.arcx.data.local.db.FileMetadataEntity
 import com.m5dev.arcx.data.ndk.ArchiveNative
 import com.m5dev.arcx.domain.model.FileItem
 import com.m5dev.arcx.domain.model.FileType
@@ -15,7 +17,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class FileRepositoryImpl @Inject constructor() : FileRepository {
+class FileRepositoryImpl @Inject constructor(
+    private val fileMetadataDao: FileMetadataDao
+) : FileRepository {
 
     override suspend fun getFilesForPath(path: String): Result<List<FileItem>> = withContext(Dispatchers.IO) {
         try {
@@ -28,11 +32,25 @@ class FileRepositoryImpl @Inject constructor() : FileRepository {
             }
 
             val files = directory.listFiles()
-                ?: return@withContext Result.failure(SecurityException("Cannot list files for path: $path"))
+            if (files == null) {
+                val cached = fileMetadataDao.getFilesForParent(path)
+                if (cached.isNotEmpty()) {
+                    return@withContext Result.success(cached.map { mapEntityToFileItem(it) })
+                }
+                return@withContext Result.failure(SecurityException("Cannot list files for path: $path"))
+            }
 
             val items = files.map { file ->
                 mapToFileItem(file)
             }.sortedWith(compareBy({ !it.isFolder }, { it.name.lowercase(Locale.ROOT) }))
+
+            try {
+                fileMetadataDao.clearFilesForParent(path)
+                val entities = items.map { mapFileItemToEntity(it, path) }
+                fileMetadataDao.insertFiles(entities)
+            } catch (e: Exception) {
+                // Ignore DB cache errors
+            }
 
             Result.success(items)
         } catch (e: Exception) {
@@ -130,6 +148,7 @@ class FileRepositoryImpl @Inject constructor() : FileRepository {
                 file.delete()
             }
             if (deleted) {
+                fileMetadataDao.deleteFileByPath(path)
                 Result.success(true)
             } else {
                 Result.failure(IllegalStateException("Failed to delete $path"))
@@ -308,5 +327,43 @@ class FileRepositoryImpl @Inject constructor() : FileRepository {
         if (timestamp == 0L) return ""
         val sdf = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
         return sdf.format(Date(timestamp))
+    }
+
+    private fun mapFileItemToEntity(item: FileItem, parentPath: String): FileMetadataEntity {
+        return FileMetadataEntity(
+            path = item.path,
+            parentPath = parentPath,
+            name = item.name,
+            isFolder = item.isFolder,
+            sizeInBytes = item.sizeInBytes,
+            formattedSize = item.formattedSize,
+            lastModifiedTimestamp = item.lastModifiedTimestamp,
+            formattedDate = item.formattedDate,
+            extension = item.extension,
+            fileType = item.fileType.name,
+            itemCount = item.itemCount,
+            canRead = item.canRead,
+            canWrite = item.canWrite,
+            cachedAtTimestamp = System.currentTimeMillis()
+        )
+    }
+
+    private fun mapEntityToFileItem(entity: FileMetadataEntity): FileItem {
+        val type = try { FileType.valueOf(entity.fileType) } catch (e: Exception) { FileType.OTHER }
+        return FileItem(
+            id = entity.path,
+            name = entity.name,
+            path = entity.path,
+            isFolder = entity.isFolder,
+            sizeInBytes = entity.sizeInBytes,
+            formattedSize = entity.formattedSize,
+            lastModifiedTimestamp = entity.lastModifiedTimestamp,
+            formattedDate = entity.formattedDate,
+            extension = entity.extension,
+            fileType = type,
+            itemCount = entity.itemCount,
+            canRead = entity.canRead,
+            canWrite = entity.canWrite
+        )
     }
 }

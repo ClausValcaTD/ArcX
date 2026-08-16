@@ -281,7 +281,110 @@ class FileBrowserViewModel @Inject constructor(
 
     fun onOptionActionExtract(fileItem: FileItem, password: String? = null) {
         onDismissFileOptions()
+        _uiState.update {
+            it.copy(
+                showExtractOptionsDialog = true,
+                extractOptionsFileItem = fileItem
+            )
+        }
+    }
 
+    fun onDismissExtractOptionsDialog() {
+        _uiState.update {
+            it.copy(
+                showExtractOptionsDialog = false,
+                extractOptionsFileItem = null
+            )
+        }
+    }
+
+    fun onExtractHere() {
+        val item = _uiState.value.extractOptionsFileItem ?: return
+        onDismissExtractOptionsDialog()
+        checkEncryptionAndExtract(item, _uiState.value.currentPath)
+    }
+
+    fun onExtractToFolder() {
+        val item = _uiState.value.extractOptionsFileItem ?: return
+        onDismissExtractOptionsDialog()
+        val folderName = item.name.substringBeforeLast(".")
+        val destPath = "${_uiState.value.currentPath}/$folderName"
+        checkEncryptionAndExtract(item, destPath)
+    }
+
+    fun onOpenAdvancedExtract() {
+        val item = _uiState.value.extractOptionsFileItem ?: return
+        onDismissExtractOptionsDialog()
+
+        val initialConfig = AdvancedExtractConfig(
+            archiveItem = item,
+            destPath = _uiState.value.currentPath,
+            isLoadingContents = true
+        )
+
+        _uiState.update {
+            it.copy(
+                showAdvancedExtractDialog = true,
+                advancedExtractConfig = initialConfig
+            )
+        }
+
+        viewModelScope.launch {
+            val result = fileRepository.listArchiveContents(item.path)
+            result.fold(
+                onSuccess = { contents ->
+                    _uiState.update { state ->
+                        state.advancedExtractConfig?.let { currentConfig ->
+                            state.copy(
+                                advancedExtractConfig = currentConfig.copy(
+                                    archiveContents = contents,
+                                    selectedFiles = contents.toSet(),
+                                    isLoadingContents = false
+                                )
+                            )
+                        } ?: state
+                    }
+                },
+                onFailure = { error ->
+                    val errMsg = error.localizedMessage ?: ""
+                    val isEnc = errMsg.contains("passphrase", ignoreCase = true) ||
+                            errMsg.contains("password", ignoreCase = true) ||
+                            errMsg.contains("encrypted", ignoreCase = true)
+
+                    _uiState.update { state ->
+                        state.advancedExtractConfig?.let { currentConfig ->
+                            state.copy(
+                                advancedExtractConfig = currentConfig.copy(
+                                    isEncrypted = isEnc,
+                                    isLoadingContents = false
+                                )
+                            )
+                        } ?: state
+                    }
+                }
+            )
+        }
+    }
+
+    fun onDismissAdvancedExtractDialog() {
+        _uiState.update {
+            it.copy(
+                showAdvancedExtractDialog = false,
+                advancedExtractConfig = null
+            )
+        }
+    }
+
+    fun onSubmitAdvancedExtract(config: AdvancedExtractConfig) {
+        onDismissAdvancedExtractDialog()
+        enqueueExtractionWorker(
+            fileItem = config.archiveItem,
+            destPath = config.destPath,
+            password = if (config.password.isNotEmpty()) config.password else null
+        )
+    }
+
+    private fun checkEncryptionAndExtract(fileItem: FileItem, destPath: String, password: String? = null) {
         if (password == null) {
             viewModelScope.launch {
                 val listResult = fileRepository.listArchiveContents(fileItem.path)
@@ -307,25 +410,15 @@ class FileBrowserViewModel @Inject constructor(
                         )
                     }
                 } else {
-                    enqueueExtractionWorker(fileItem, null)
+                    enqueueExtractionWorker(fileItem, destPath, null)
                 }
             }
         } else {
-            enqueueExtractionWorker(fileItem, password)
+            enqueueExtractionWorker(fileItem, destPath, password)
         }
     }
 
-    private fun enqueueExtractionWorker(fileItem: FileItem, password: String?) {
-        val targetDirName = fileItem.name.substringBeforeLast(".")
-        val currentPath = _uiState.value.currentPath
-        val defaultExtractLoc = currentUserPreferences.defaultExtractLocation
-        val baseDestDir = if (defaultExtractLoc.isNotBlank() && File(defaultExtractLoc).exists()) {
-            defaultExtractLoc
-        } else {
-            currentPath
-        }
-        val destPath = "$baseDestDir/$targetDirName"
-
+    private fun enqueueExtractionWorker(fileItem: FileItem, destPath: String, password: String?) {
         try {
             val workRequest = OneTimeWorkRequestBuilder<ExtractionWorker>()
                 .addTag(ExtractionWorker.TAG_EXTRACTION_WORK)
@@ -357,7 +450,10 @@ class FileBrowserViewModel @Inject constructor(
     fun onConfirmPasswordExtraction(password: String) {
         val fileItem = _uiState.value.itemForPasswordExtraction ?: return
         _uiState.update { it.copy(showPasswordPrompt = false) }
-        enqueueExtractionWorker(fileItem, password)
+        val targetDirName = fileItem.name.substringBeforeLast(".")
+        val currentPath = _uiState.value.currentPath
+        val destPath = "$currentPath/$targetDirName"
+        enqueueExtractionWorker(fileItem, destPath, password)
     }
 
     fun onDismissPasswordPrompt() {
