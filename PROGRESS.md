@@ -10,9 +10,9 @@
 - [x] Project structure setup
 - [x] Gradle configuration
 - [x] Dependency injection setup (Hilt)
+- [x] File browser UI
 
 ## Next Steps
-- [ ] File browser UI
 - [ ] Storage permissions handling
 - [ ] NDK integration (libarchive)
 - [ ] Archive extraction (ZIP)
@@ -24,3 +24,4 @@
 ## Notes
 - Using NotificationCompat for Android 7 compatibility
 - NDK will be added in next steps
+- Using mock data, real file access in next step

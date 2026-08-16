@@ -57,6 +57,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation("androidx.compose.material:material-icons-extended")
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     // Navigation & Hilt Integration
@@ -70,4 +71,7 @@ dependencies {
     // Coroutines
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
+
+    // Testing
+    testImplementation("junit:junit:4.13.2")
 }
